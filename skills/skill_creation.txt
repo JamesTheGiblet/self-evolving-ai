@@ -1,0 +1,141 @@
+# Guide to Creating New Skills
+
+This guide outlines the steps and requirements for adding a new skill to the self-evolving AI system.
+
+## 1. Skill File Creation
+
+*   Create a new Python file for your skill (e.g., `my_new_skill.py`) in the `skills/` directory.
+*   The filename should be in `snake_case` (e.g., `echo_skill.py`, `advanced_data_analyzer.py`). This helps the `skill_loader` correctly infer the class name.
+
+## 2. Skill Class Definition
+
+*   **Inheritance**: Your skill class must inherit from `skills.base_skill.BaseSkillTool`.
+    ```python
+    from skills.base_skill import BaseSkillTool
+
+    class MyNewSkill(BaseSkillTool):
+        # ...
+    ```
+*   **`__init__(self, ...)` Method**:
+    *   The constructor should accept any dependencies it needs (e.g., `knowledge_base`, `context_manager`, `communication_bus`). These are passed by the `skill_loader.py` if defined in its `skill_dependencies` dictionary. If your skill doesn't need them, you can omit them or provide default `None` values.
+    *   **Crucially**, you must call `super().__init__(skill_name="YourSkillName")`. The `skill_name` argument is required by `BaseSkillTool`.
+    *   Initialize `self.skill_name` *before* the `super()` call.
+    *   Set `self.description` to a brief explanation of what the skill does.
+    *   Define `self.commands` as a dictionary where keys are command strings (e.g., "do_thing") and values are the corresponding method handlers (e.g., `self.do_thing_command`).
+    ```python
+    class EchoSkill(BaseSkillTool):
+        def __init__(self, knowledge_base=None, context_manager=None, communication_bus=None):
+            self.skill_name = "EchoSkill"  # Define skill_name first
+            super().__init__(skill_name=self.skill_name) # Pass it to super
+
+            # Optional: Store dependencies if needed by this skill
+            # self.knowledge_base = knowledge_base 
+            
+            self.description = "Echoes back the input string."
+            self.commands = {
+                "echo": self.echo_command
+            }
+            log(f"[{self.skill_name}] Skill initialized.", level="INFO")
+    ```
+*   **`get_capabilities(self) -> Dict[str, Any]` Method**:
+    *   This method **must be overridden**.
+    *   It should return a dictionary detailing the skill's name, overall description, and a nested dictionary of its commands.
+    *   The `TaskRouter` uses this information to understand what the skill can do and how to invoke its commands.
+    *   **Structure**:
+        ```python
+        def get_capabilities(self) -> Dict[str, Any]:
+            return {
+                "skill_name": self.skill_name,
+                "description": self.description,
+                "commands": {
+                    "command_name_1": {
+                        "description": "What this command does.",
+                        "args_usage": "<arg1_name> [optional_arg2]", # How to use arguments
+                        "example": "command_name_1 foo bar",        # An example invocation
+                        "keywords": ["keyword1", "keyword2"]        # Keywords for LLM routing
+                    },
+                    # ... more commands
+                }
+            }
+        ```
+*   **Command Handler Methods** (e.g., `echo_command(self, *args) -> str`):
+    *   These methods implement the actual logic for each command.
+    *   They receive arguments as a list of strings (`*args`) after `shlex.split` has processed the input command string.
+    *   They **must** return a JSON string, typically by using `self._create_json_response(...)` from `BaseSkillTool`.
+    ```python
+    def echo_command(self, *args) -> str:
+        if not args:
+            # Use self._create_json_response for standardized output
+            return self._create_json_response(success=False, error="No text provided to echo.")
+
+        echo_text = " ".join(args)
+        # Use self._create_json_response
+        return self._create_json_response(success=True, data={"echoed_text": echo_text})
+    ```
+*   **`_execute_skill(self, args: list) -> str` Method**:
+    *   This method is called by `BaseSkillTool.execute()` after it parses the command string using `shlex`.
+    *   It receives the command name as `args[0]` and subsequent arguments in `args[1:]`.
+    *   It should dispatch to the appropriate command handler method based on `args[0]`.
+    *   It **must** return a JSON string, typically by calling `self._create_json_response(...)`.
+    ```python
+    def _execute_skill(self, args: list) -> str:
+        if not args:
+            return self._create_json_response(success=False, error="No command provided.")
+
+        command_name = args[0].lower() # Or keep case if significant
+        
+        if command_name == "echo":
+            return self.echo_command(*args[1:]) # Pass remaining args
+        # elif command_name == "another_command":
+            # return self.another_command_handler(*args[1:])
+        else:
+            return self._create_json_response(success=False, error=f"Unknown command: {command_name}")
+    ```
+*   **`execute(self, command_str: str) -> str` Method (Inherited)**:
+    *   This method is inherited from `BaseSkillTool`. You generally **do not need to override it**.
+    *   It handles parsing the raw `command_str` using `shlex` and then calls `self._execute_skill(parsed_args)`.
+
+## 3. Skill Registration (Automatic)
+
+*   The `core/skill_loader.py` script automatically scans the `skills/` directory.
+*   It loads modules, identifies classes inheriting from `BaseSkillTool`, and instantiates them.
+*   It generates a `lineage_id` (e.g., `skill_echo_skill_ops`) and a default `service_capability_name` (e.g., `echo_skill_ops_v1`) for the skill.
+*   A `SkillAgent` is created for your new skill.
+*   The `TaskRouter` registers the skill and its commands based on the `get_capabilities()` output.
+*   The `MutationEngine` becomes aware of the skill's primary service capability.
+
+## 4. Dependencies (Optional)
+
+*   If your skill requires specific dependencies (like a dedicated `memory_store` from the `KnowledgeBase`), you can configure this in `core/skill_loader.py` within the `skill_dependencies` dictionary:
+    ```python
+    # core/skill_loader.py
+    skill_dependencies = {
+        "Calendar": {"memory_store": knowledge_base_instance.get_skill_memory_store("Calendar")},
+        "MyNewSkill": {"some_dependency": some_value_or_instance}
+        # Add other skills and their specific dependencies here if needed
+    }
+    ```
+    Your skill's `__init__` method will then receive these as keyword arguments.
+
+## 5. Testing
+
+*   It's highly recommended to create unit tests for your new skill in a corresponding file (e.g., `skills/test_my_new_skill.py`).
+*   Test individual command handlers and the overall `execute` behavior with various inputs, including edge cases and error conditions.
+*   Ensure your tests check for the correct JSON response structure.
+
+## Checklist:
+
+- [ ] Skill file created in `skills/` directory (e.g., `my_skill.py`).
+- [ ] Class inherits from `BaseSkillTool`.
+- [ ] `__init__` method:
+    - [ ] Sets `self.skill_name`.
+    - [ ] Calls `super().__init__(skill_name=self.skill_name)`.
+    - [ ] Sets `self.description`.
+    - [ ] Initializes `self.commands` dictionary.
+- [ ] `get_capabilities()` method is overridden and returns the correct dictionary structure.
+- [ ] `_execute_skill(self, args: list)` method is implemented to handle commands.
+- [ ] All command handler methods return JSON strings via `self._create_json_response()`.
+- [ ] (Optional) Dependencies configured in `skill_loader.py` if needed.
+- [ ] (Recommended) Unit tests created.
+
+By following this guide, you should be able to integrate new skills more smoothly!
