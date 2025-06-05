@@ -428,15 +428,44 @@ class KnowledgeBase:
         # Also apply to fact memory
         self.fact_memory.apply_decay_and_pruning(current_tick)
 
-    def get_recent_facts(self, limit: int = 10) -> List[Fact]:
+    def get_recent_facts(self, limit: int = 10, category: Optional[str] = None, 
+                         source: Optional[str] = None, keywords: Optional[str] = None) -> List[Fact]:
         """
         Retrieves the most recent facts from FactMemory, sorted by creation timestamp.
+        Optionally filters by category, source, or keywords.
         """
         all_facts = self.fact_memory.get_all_facts()
         if not all_facts:
             return []
 
-        # Sort by creation_timestamp (most recent first)
-        # The Fact object has a 'creation_timestamp: float' attribute.
-        sorted_facts = sorted(all_facts, key=lambda f: f.creation_timestamp, reverse=True)
-        return sorted_facts[:limit]
+        filtered_facts: List[Fact] = []
+        query_terms = [term.lower() for term in re.split(r'\s+', keywords.strip()) if term] if keywords else []
+
+        for fact in all_facts:
+            # Apply category filter
+            if category is not None and fact.content.get('category', '').lower() != category.lower():
+                continue
+
+            # Apply source filter (case-insensitive substring match)
+            if source is not None and source.lower() not in fact.source.lower():
+                continue
+
+            # Apply keyword filter (check text_content and tags)
+            if query_terms:
+                text_to_search = fact.content.get("text_content", "").lower()
+                tags_to_search = [tag.lower() for tag in fact.content.get("tags", [])]
+                keyword_match = False
+                for term in query_terms:
+                    if term in text_to_search or any(term in tag_text for tag_text in tags_to_search):
+                        keyword_match = True
+                        break
+                if not keyword_match:
+                    continue
+
+            # If the fact passes all filters, update its access and add to filtered list
+            self.fact_memory._update_fact_relevance_and_access(fact, None) # Update access using timestamp if tick is None
+            filtered_facts.append(fact)
+
+        # Sort filtered facts by creation_timestamp (most recent first)
+        sorted_filtered_facts = sorted(filtered_facts, key=lambda f: f.creation_timestamp, reverse=True)
+        return sorted_filtered_facts[:limit]

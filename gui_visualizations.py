@@ -5,6 +5,10 @@ from typing import Any, Dict, List, Optional
 import threading
 import time
 from utils.logger import log # Use the system logger
+# Add these imports for charting
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from collections import deque # For storing limited history
 # Assume access to core components like MetaAgent, KnowledgeBase, ContextManager
 
 class AgentMapFrame(ctk.CTkFrame):
@@ -77,12 +81,41 @@ class MemoryStreamFrame(ctk.CTkFrame):
         self.label = ctk.CTkLabel(self, text="Recent Knowledge Base Activity:", font=("Arial", 14, "bold"))
         self.label.grid(row=0, column=0, sticky="w", padx=5, pady=5)
 
-        self.memory_textbox = ctk.CTkTextbox(self, height=150, state="disabled", wrap="word") # Wrap long lines
-        self.memory_textbox.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
-        self.grid_rowconfigure(1, weight=1) # Make the textbox expandable
+        # --- Filter Controls ---
+        filter_row = 1
+        self.filter_label = ctk.CTkLabel(self, text="Filter:", font=("Arial", 12, "bold"))
+        self.filter_label.grid(row=filter_row, column=0, sticky="w", padx=5, pady=2)
+        filter_row += 1
 
-        self.last_update_tick = -1
-        self.display_limit = 20 # How many recent items to display
+        # Category Filter
+        self.category_filter_label = ctk.CTkLabel(self, text="Category:")
+        self.category_filter_label.grid(row=filter_row, column=0, sticky="w", padx=(10, 5), pady=0)
+        self.category_filter_combobox = ctk.CTkComboBox(self, values=["any", "text", "visual", "audio", "code", "data_table", "other"], state="readonly")
+        self.category_filter_combobox.set("any")
+        self.category_filter_combobox.grid(row=filter_row, column=0, sticky="ew", padx=(80, 5), pady=2)
+        filter_row += 1
+
+        # Source Filter
+        self.source_filter_label = ctk.CTkLabel(self, text="Source:")
+        self.source_filter_label.grid(row=filter_row, column=0, sticky="w", padx=(10, 5), pady=0)
+        self.source_filter_entry = ctk.CTkEntry(self, placeholder_text="e.g., user_gui_injection")
+        self.source_filter_entry.grid(row=filter_row, column=0, sticky="ew", padx=(80, 5), pady=2)
+        filter_row += 1
+
+        # Keyword Filter
+        self.keyword_filter_label = ctk.CTkLabel(self, text="Keywords:")
+        self.keyword_filter_label.grid(row=filter_row, column=0, sticky="w", padx=(10, 5), pady=0)
+        self.keyword_filter_entry = ctk.CTkEntry(self, placeholder_text="e.g., goal, error")
+        self.keyword_filter_entry.grid(row=filter_row, column=0, sticky="ew", padx=(80, 5), pady=2)
+        filter_row += 1
+
+        # --- Scrollable Frame for Facts ---
+        self.memory_list_frame = ctk.CTkScrollableFrame(self, height=150) # Scrollable list of facts
+        self.memory_list_frame.grid(row=filter_row, column=0, sticky="nsew", padx=5, pady=5)
+        self.grid_rowconfigure(filter_row, weight=1) # Make the list frame expandable
+
+        self.fact_widgets = {} # To keep track of fact display widgets
+        self.display_limit = 20 # How many recent items to display (passed to KB)
 
     def update_display(self):
         """Fetches and displays recent knowledge base entries."""
@@ -91,47 +124,49 @@ class MemoryStreamFrame(ctk.CTkFrame):
 
         current_tick = self.context_manager.get_tick()
         # Only update if the tick has advanced since the last update
-        # This prevents excessive querying if the GUI update rate is faster than ticks
-        if current_tick <= self.last_update_tick:
-             return
+        # We'll rely on the main GUI loop's update frequency.
+        # The filtering logic is applied on every update.
 
         try:
-            # Need a method in KnowledgeBase to get recent facts.
-            # Let's assume knowledge_base.get_recent_facts(limit) exists.
-            # If not, we'll need to add it.
-            recent_facts = self.knowledge_base.get_recent_facts(limit=self.display_limit)
+            # Read filter values
+            category_filter = self.category_filter_combobox.get()
+            source_filter = self.source_filter_entry.get().strip()
+            keyword_filter = self.keyword_filter_entry.get().strip()
 
-            self.memory_textbox.configure(state="normal")
-            self.memory_textbox.delete("1.0", "end")
+            # Call the KB method with filters
+            recent_facts = self.knowledge_base.get_recent_facts(
+                limit=self.display_limit,
+                category=category_filter if category_filter != "any" else None,
+                source=source_filter if source_filter else None,
+                keywords=keyword_filter if keyword_filter else None
+            )
+
+            # Clear existing widgets in the scrollable frame
+            for widget in self.memory_list_frame.winfo_children():
+                widget.destroy()
+            self.fact_widgets.clear()
 
             if recent_facts:
-                # Sort by tick/timestamp if not already sorted by get_recent_facts
-                # Assuming Fact objects have 'content' (dict) and 'id' attributes
-                # and content has 'original_tick' and 'text_content'
-                sorted_facts = sorted(recent_facts, key=lambda f: f.content.get('original_tick', 0), reverse=True)
-
-                for fact in sorted_facts:
+                for fact in recent_facts: # KB method should return already sorted and filtered
                     tick = fact.content.get('original_tick', 'N/A')
                     source = fact.source or 'N/A'
                     content_preview = fact.content.get('text_content', 'N/A')
                     # Truncate content preview for readability
-                    if len(content_preview) > 100:
-                        content_preview = content_preview[:97] + "..."
+                    display_text = f"[Tick {tick}] [Source: {source}] {content_preview[:100]}{'...' if len(content_preview) > 100 else ''}"
 
-                    display_text = f"[Tick {tick}] [Source: {source}] {content_preview}\n"
-                    self.memory_textbox.insert("end", display_text)
+                    # Create a clickable button for each fact
+                    btn = ctk.CTkButton(self.memory_list_frame, text=display_text,
+                                        command=lambda f=fact: self._show_fact_details(f),
+                                        anchor="w") # Align text to the left
+                    btn.pack(fill="x", pady=1)
+                    self.fact_widgets[fact.id] = btn
                 
-                # Add a separator or summary if needed
-                if len(recent_facts) >= self.display_limit:
-                     self.memory_textbox.insert("end", f"\n--- Displaying last {self.display_limit} items ---\n")
-
             else:
-                self.memory_textbox.insert("end", "No recent knowledge base activity.")
+                no_activity_label = ctk.CTkLabel(self.memory_list_frame, text="No recent knowledge base activity matching filters.", anchor="w")
+                no_activity_label.pack(fill="x", pady=10)
 
-            self.memory_textbox.configure(state="disabled")
-            self.memory_textbox.see("end") # Scroll to the end
-
-            self.last_update_tick = current_tick # Update the last processed tick
+            # Ensure the scrollable frame updates its layout
+            self.memory_list_frame.update_idletasks()
 
         except AttributeError:
              # Handle case where knowledge_base.get_recent_facts doesn't exist yet
@@ -139,32 +174,18 @@ class MemoryStreamFrame(ctk.CTkFrame):
              self.memory_textbox.delete("1.0", "end")
              self.memory_textbox.insert("end", "KnowledgeBase method 'get_recent_facts' not found. Cannot display memory stream.")
              self.memory_textbox.configure(state="disabled")
+             log(f"KnowledgeBase method 'get_recent_facts' not found.", level="ERROR")
         except Exception as e:
             log(f"Error updating MemoryStreamFrame: {e}", level="ERROR", exc_info=True)
-            self.memory_textbox.configure(state="normal")
-            self.memory_textbox.insert("end", f"Error displaying memory stream: {str(e)}")
-            self.memory_textbox.configure(state="disabled")
+            # Display error in the scrollable frame
+            error_label = ctk.CTkLabel(self.memory_list_frame, text=f"Error displaying memory stream: {str(e)}", text_color="red", anchor="w")
+            error_label.pack(fill="x", pady=10)
+            self.memory_list_frame.update_idletasks()
 
-
-# Note: You will need to add a get_recent_facts method to your KnowledgeBase class.
-# Example implementation in KnowledgeBase (memory/knowledge_base.py):
-#
-# class KnowledgeBase:
-#     # ... existing methods ...
-#
-#     def get_recent_facts(self, limit: int = 10) -> List[Fact]:
-#         """Retrieves the most recent facts added to the knowledge base."""
-#         # Assuming self.facts is a list of Fact objects
-#         # You might need a more sophisticated way to track 'recent' if facts are modified/deleted
-#         # For simplicity, let's assume facts are appended and we sort by original_tick
-#         if not self.facts:
-#             return []
-#         
-#         # Sort by original_tick descending and take the top 'limit'
-#         # Ensure 'original_tick' exists in fact.content
-#         sorted_facts = sorted(self.facts, key=lambda f: f.content.get('original_tick', 0), reverse=True)
-#         return sorted_facts[:limit]
-#
+    def _show_fact_details(self, fact):
+        """Placeholder method to display full fact details when a fact button is clicked."""
+        # Implement logic here to open a new window or update a detail pane
+        log(f"Clicked on Fact ID: {fact.id}. Full content: {fact.content}", level="INFO")
 
 class KnowledgeInjectionFrame(ctk.CTkFrame):
     def __init__(self, master, knowledge_base_ref, context_manager_ref, gui_logger_func, **kwargs):
@@ -383,4 +404,80 @@ class AgentSummaryFrame(ctk.CTkFrame):
             self.agent_buttons[agent_name_val] = btn
         
         self.scrollable_frame.update_idletasks()
+
+
+class SystemMetricsChartFrame(ctk.CTkFrame):
+    """
+    A CTkFrame to display system metrics using Matplotlib charts.
+    """
+    def __init__(self, master, context_manager, mutation_engine, **kwargs):
+        super().__init__(master, **kwargs)
+        self.context_manager = context_manager
+        self.mutation_engine = mutation_engine
+
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1) # Make chart area expandable
+
+        self.label = ctk.CTkLabel(self, text="System Metrics:", font=("Arial", 14, "bold"))
+        self.label.grid(row=0, column=0, sticky="w", padx=5, pady=5)
+
+        # Data storage for charts (e.g., last N points)
+        self.max_history = 50 # Number of data points to show on the chart
+        self.ticks_history = deque(maxlen=self.max_history)
+        self.avg_fitness_history = deque(maxlen=self.max_history)
+
+        # Matplotlib Figure and Axes
+        self.fig, self.ax_fitness = plt.subplots(figsize=(5, 3), dpi=100)
+        # Basic theming attempt (can be expanded)
+        # fg_color = self._apply_appearance_mode(ctk.ThemeManager.theme["CTkFrame"]["fg_color"])
+        # self.fig.patch.set_facecolor(fg_color)
+        # self.ax_fitness.set_facecolor(fg_color)
+        # text_color = self._apply_appearance_mode(ctk.ThemeManager.theme["CTkLabel"]["text_color"])
+        # self.ax_fitness.tick_params(axis='x', colors=text_color)
+        # self.ax_fitness.tick_params(axis='y', colors=text_color)
+        # for spine in self.ax_fitness.spines.values():
+        #    spine.set_edgecolor(text_color)
+        # self.ax_fitness.title.set_color(text_color)
+        # self.ax_fitness.xaxis.label.set_color(text_color)
+        # self.ax_fitness.yaxis.label.set_color(text_color)
+
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self)
+        self.canvas_widget = self.canvas.get_tk_widget()
+        self.canvas_widget.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        
+        self.line_fitness, = self.ax_fitness.plot([], [], lw=2, label="Avg Fitness")
+        self.ax_fitness.set_title("Average Agent Fitness")
+        self.ax_fitness.set_xlabel("Tick")
+        self.ax_fitness.set_ylabel("Avg. Fitness")
+        self.ax_fitness.legend()
+        self.fig.tight_layout()
+
+    def update_display(self):
+        if not self.context_manager or not self.mutation_engine:
+            return
+
+        current_tick = self.context_manager.get_tick()
+        
+        avg_fitness = 0.0
+        if hasattr(self.mutation_engine, 'last_agent_fitness_scores') and self.mutation_engine.last_agent_fitness_scores:
+            fitness_scores = list(self.mutation_engine.last_agent_fitness_scores.values())
+            if fitness_scores:
+                avg_fitness = sum(fitness_scores) / len(fitness_scores)
+
+        self.ticks_history.append(current_tick)
+        self.avg_fitness_history.append(avg_fitness)
+
+        self.line_fitness.set_data(list(self.ticks_history), list(self.avg_fitness_history))
+        
+        if self.ticks_history:
+            self.ax_fitness.set_xlim(min(self.ticks_history), max(self.ticks_history) if len(self.ticks_history) > 1 else max(self.ticks_history) + 1)
+        if self.avg_fitness_history:
+            self.ax_fitness.set_ylim(min(self.avg_fitness_history) - 0.1, max(self.avg_fitness_history) + 0.1)
+        else:
+            self.ax_fitness.set_ylim(0, 1)
+
+        try:
+            self.canvas.draw_idle()
+        except Exception as e:
+            log(f"Error drawing chart canvas: {e}", level="ERROR", exc_info=True)
 #

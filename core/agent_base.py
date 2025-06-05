@@ -12,7 +12,7 @@ from engine.identity_engine import IdentityEngine # Forward declaration or impor
 
 class BaseAgent:
     # Define known behavior modes at the class level
-    BEHAVIOR_MODES = ["explore", "observer"]
+    BEHAVIOR_MODES = ["explore", "observer", "reactive"]
 
     def __init__(self,
                  name: str,
@@ -91,11 +91,19 @@ class BaseAgent:
         Returns:
             True if the message was handled by this method (or an override), False otherwise.
         """
+        # Check for specific message types handled by the base class
         action = message_content.get('action')
+        message_type = message_content.get('type') # Check for the new 'type' key
+
         # Example: Basic handling for a generic broadcast or system message
         if action == "system_info_broadcast":
             log(f"[{self.name}] BaseHandler: Received system info broadcast from {sender_id}: {message_content.get('data')}", level="INFO")
             return True
+
+        # Handle generic broadcasts identified by the new 'type' key
+        if message_type == "broadcast":
+            log(f"[{self.name}] BaseHandler: Received generic broadcast from {sender_id}. Original content: {str(message_content.get('original_content'))[:100]}...", level="DEBUG")
+            return True # Indicate message was handled (as a recognized broadcast type)
         
         return False # Not handled by the base class's generic handler
 

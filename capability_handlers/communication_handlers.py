@@ -18,7 +18,16 @@ def execute_communication_broadcast_v1(agent: BaseAgent, params_used: dict, cap_
     immediate_reward = 0.0
 
     message_content_dict = cap_inputs.get("message_content", {"info": "default broadcast"})
-    
+
+    # Wrap the original message content with a type indicator and sender info
+    # This allows BaseAgent._handle_message to recognize it as a broadcast
+    broadcast_message_content = {
+        "type": "broadcast", # <-- Add this key to identify it as a broadcast
+        "original_content": message_content_dict, # <-- Nest the original content
+        "sender_id": agent.id, # Add sender info for clarity
+        "sender_name": agent.name,
+        "tick": context.get_tick() # Add tick info
+    }
     if agent.communication_bus and all_agent_names_in_system: 
         agent.communication_bus.broadcast_message(agent.name, message_content_dict, all_agent_names_in_system)
         agent.memory.log_message_sent()

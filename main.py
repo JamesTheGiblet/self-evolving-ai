@@ -37,15 +37,22 @@ global_context_manager_instance = None # For shutdown handler
 def shutdown_handler(signum, frame):
     log(f"Signal {signum} received. Initiating graceful shutdown...")
     if app_gui_instance and hasattr(app_gui_instance, 'on_closing') and callable(app_gui_instance.on_closing):
-        log("Attempting to close GUI gracefully...")
-        # Schedule the on_closing method to be called in the Tkinter main loop
-        app_gui_instance.after(0, app_gui_instance.on_closing)
+        # Check if GUI still exists and is not already in the process of closing
+        if app_gui_instance.winfo_exists() and not app_gui_instance._is_closing:
+            log("Attempting to close GUI gracefully via after()...")
+            app_gui_instance.after(0, app_gui_instance.on_closing)
+        elif not app_gui_instance.winfo_exists():
+            log("GUI instance no longer exists. Attempting direct context stop.", level="WARN")
+            if global_context_manager_instance and hasattr(global_context_manager_instance, 'stop') and callable(global_context_manager_instance.stop):
+                global_context_manager_instance.stop()
+            sys.exit(0) # Fallback exit
+        else: # GUI exists but _is_closing is True
+            log("GUI is already in the process of closing.", level="INFO")
     else:
         log("GUI instance not available or on_closing not callable. Attempting direct context stop and exit.", level="WARN")
         if global_context_manager_instance and hasattr(global_context_manager_instance, 'stop') and callable(global_context_manager_instance.stop):
             global_context_manager_instance.stop()
         sys.exit(0) # Fallback exit
-
 def main():
     global global_context_manager_instance, app_gui_instance
 

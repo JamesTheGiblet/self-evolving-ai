@@ -14,8 +14,8 @@ class CapabilityInputPreparer:
     def __init__(self, skill_capability_mapping: Dict[str, List[str]]):
         self.SKILL_CAPABILITY_MAPPING = skill_capability_mapping
         self.globally_preferable_skill_actions = [
-            "maths_operation", "log_summary", "complexity",
-            "web_operation", "file_operation", "api_call"
+            "maths_operation", "log_summary", "complexity_analysis", # Changed "complexity"
+            "web_operation", "file_operation", "api_call" # to "complexity_analysis"
         ]
         log("[CapabilityInputPreparer] Initialized.")
 
@@ -35,7 +35,8 @@ class CapabilityInputPreparer:
         }
 
     def _prepare_web_operation_skill_data(self, agent: 'BaseAgent', context: 'ContextManager') -> Dict[str, Any]:
-        web_action = random.choice(["fetch", "get_text"])
+        # Based on TaskRouter log, WebScraper skill only supports "get"
+        web_action = "get" 
         example_urls = ["https://example.com", "https://www.python.org"]
         target_url = random.choice(example_urls)
         return {"web_command": f"{web_action} {target_url}"}
@@ -131,7 +132,7 @@ class CapabilityInputPreparer:
             if chosen_skill_action == "maths_operation":
                 inputs["request_data"] = self._prepare_maths_operation_skill_data(agent, context)
                 request_data_log_detail = f"with maths command: {inputs['request_data']['maths_command']}"
-            elif chosen_skill_action in ["log_summary", "complexity"]:
+            elif chosen_skill_action in ["log_summary", "complexity_analysis"]: # Changed "complexity"
                 inputs["request_data"] = self._prepare_log_summary_complexity_skill_data(agent, chosen_skill_action)
                 request_data_log_detail = "with data analysis request."
             elif chosen_skill_action == "web_operation":
@@ -183,7 +184,9 @@ class CapabilityInputPreparer:
             log(f"[{agent.name}] Preparing request_llm_plan_v1 with goal: {inputs['goal_description']}")
         elif cap_name_to_prep == "interpret_goal_with_llm_v1":
             default_user_query = "What is the current status and should I be concerned?"
-            if hasattr(agent, 'current_goal') and agent.current_goal.get("type") == "user_defined_goal":
+            if hasattr(agent, 'current_goal') and agent.current_goal.get("type") == "interpret_user_goal":
+                default_user_query = agent.current_goal.get("details", {}).get("user_query", default_user_query)
+            elif hasattr(agent, 'current_goal') and agent.current_goal.get("type") == "user_defined_goal": # Fallback if somehow called with user_defined_goal
                 default_user_query = agent.current_goal.get("details", {}).get("description", default_user_query)
             inputs["user_query"] = default_user_query
             log(f"[{agent.name}] Preparing interpret_goal_with_llm_v1 with user_query: '{inputs['user_query']}'")

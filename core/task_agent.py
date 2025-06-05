@@ -155,15 +155,22 @@ class TaskAgent(BaseAgent):
 
         chosen_target_skill_agent_id = None
         if preferred_target_id:
-            if preferred_target_id in suitable_agents_for_action:
-                chosen_target_skill_agent_id = preferred_target_id
-                log(f"[{self.name}] find_best_skill_agent_for_action: Using preferred target '{chosen_target_skill_agent_id}' for action '{skill_action_to_request}'.")
-            elif preferred_target_id in available_skill_agents_info:
-                log(f"[{self.name}] find_best_skill_agent_for_action: Preferred target '{preferred_target_id}' cannot perform '{skill_action_to_request}'. Looking for alternatives.", level="WARNING")
+            # Check if the preferred_target_id is a lineage prefix for any suitable agents
+            agents_in_preferred_lineage = [
+                sa_name for sa_name in suitable_agents_for_action
+                if sa_name.startswith(preferred_target_id) # Lineage match
+            ]
+            if agents_in_preferred_lineage:
+                # Choose one from the preferred lineage (e.g., highest generation or random)
+                # For now, let's pick randomly from the preferred lineage
+                chosen_target_skill_agent_id = random.choice(agents_in_preferred_lineage)
+                log(f"[{self.name}] find_best_skill_agent_for_action: Using agent '{chosen_target_skill_agent_id}' from preferred lineage '{preferred_target_id}' for action '{skill_action_to_request}'.")
             else:
-                log(f"[{self.name}] find_best_skill_agent_for_action: Preferred target '{preferred_target_id}' not found. Looking for alternatives.", level="WARNING")
-
-        if not chosen_target_skill_agent_id and suitable_agents_for_action:
+                # Preferred lineage ID was given, but no suitable (or active) agent from that lineage can perform the action.
+                log(f"[{self.name}] find_best_skill_agent_for_action: No suitable agent from preferred lineage '{preferred_target_id}' can perform '{skill_action_to_request}'. Looking for any suitable alternative. Suitable for action: {suitable_agents_for_action}", level="WARNING")
+        
+        # Fallback if no preferred target was given, or if preferred lineage had no suitable agent
+        if not chosen_target_skill_agent_id and suitable_agents_for_action: # Check suitable_agents_for_action again
             chosen_target_skill_agent_id = random.choice(suitable_agents_for_action)
             log(f"[{self.name}] find_best_skill_agent_for_action: Selected suitable agent '{chosen_target_skill_agent_id}' for action '{skill_action_to_request}'. Suitable: {suitable_agents_for_action}")
         
@@ -308,23 +315,7 @@ class TaskAgent(BaseAgent):
                 # The run() method will prioritize sequence_executor_v1 if this goal is active.
                 # No direct action here, but the goal remains until sequence_executor is chosen.
                 pass
-            else:
-                log(f"[{self.name}] Goal: 'execute_llm_generated_plan' but no plan found or plan is not a list. Details: {plan_details}", level="ERROR")
-                self.current_goal = {"type": "idle", "reason": "llm_plan_execution_failed_no_plan"}
-        elif goal_type == "generic_task": # Duplicate block, can be removed if the one above is sufficient
-            self.memory.log_tick({"action": "execute_generic_task", "details": self.current_goal.get("details"), "tick": current_tick})
-            log(f"[{self.name}] Performing generic task: {self.current_goal.get('details')}", level="DEBUG")
-            if random.random() < self.generic_task_failure_rate: 
-                 failure_details = {
-                     "task_processor_id": "generic_task_processor",
-                     "description": "Failed to complete generic task",
-                     "error_code": random.randint(1000, 1005)
-                 }
-                 self._report_symptom(symptom_type="generic_task_failure", details_dict=failure_details, severity="error")
-                 self.current_goal = {"type": "idle", "reason": "generic_task_failed"}
-            else:
-                goal_completed_successfully = True
-                self.current_goal = {"type": "idle", "reason": "generic_task_complete"}
+            # Removed duplicate "generic_task" handling from here, it's handled above.
         elif goal_type == "user_defined_goal":
             goal_description = self.current_goal.get('details', {}).get('description', '')
             if goal_description:
@@ -677,7 +668,7 @@ class TaskAgent(BaseAgent):
                      total_insight_confidence += diagnosis_data.get("confidence", 0.0)
         
         average_reward = (total_reward / num_actions) if num_actions > 0 else 0.0 
-        normalized_reward_component = (average_reward + 1) / 3 
+        normalized_reward_component = (average_reward + 1) / 2 # Standard normalization for [-1, 1] to [0, 1]
         normalized_reward_component = max(0, min(1, normalized_reward_component))
         survival_bonus = min(self.age * 0.0001, 0.1)
 
@@ -697,28 +688,6 @@ class TaskAgent(BaseAgent):
         log(f"[{self.name}] Fitness Calc: Fit={fitness:.3f} (NumActions/Execs:{num_actions}, AvgRw:{average_reward:.2f}, NormRw:{normalized_reward_component:.2f}, "
             f"Surv:{survival_bonus:.2f}, Ins:{insight_bonus:.2f}, En:{energy_bonus:.3f} ({self.energy:.1f}/{self.initial_energy:.1f}))", level="INFO") 
         return {"fitness": fitness, "executions": float(num_actions), "average_reward": average_reward}
-
-    def _choose_capability(self, context: 'ContextManager', knowledge: 'KnowledgeBase') -> Optional[str]:
-        if not self.capabilities:
-            log(f"[{self.name}] TaskAgent: No capabilities to choose from.", level="WARNING")
-            return None
-
-        if self.behavior_mode == "explore":
-            from core.capability_registry import CAPABILITY_REGISTRY as GLOBAL_CAPABILITY_REGISTRY
-            executable_task_caps = [
-                cap_name for cap_name in self.capabilities
-                if cap_name in GLOBAL_CAPABILITY_REGISTRY and GLOBAL_CAPABILITY_REGISTRY[cap_name].get("handler") is not None
-            ]
-            if not executable_task_caps:
-                log(f"[{self.name}] TaskAgent (Explore Mode): No executable capabilities available.", level="WARNING")
-                return None
-            
-            chosen_action = random.choice(executable_task_caps)
-            log(f"[{self.name}] TaskAgent (Explore Mode): Chose action '{chosen_action}' randomly from {len(executable_task_caps)} options.", level="DEBUG")
-            return chosen_action
-        else:
-            log(f"[{self.name}] TaskAgent behavior_mode is '{self.behavior_mode}', using BaseAgent capability choice logic (which might be RL-driven).", level="DEBUG")
-            return None
 
     def run(self, context: 'ContextManager', knowledge: 'KnowledgeBase', all_agent_names_in_system: list, agent_info_map: Dict[str, Dict[str, Any]]):
         current_sim_tick = context.get_tick()
@@ -770,19 +739,33 @@ class TaskAgent(BaseAgent):
                 self.capability_performance_tracker.record_capability_execution("invoke_skill_agent_v1", False, reward_for_sync_step)
                 self.state["last_failed_skill_details"] = {"tick": current_sim_tick, "target_skill_agent_id": sync_step_details_from_invoke['target_skill_agent_id'], "action_requested": sync_step_details_from_invoke['skill_action_requested'], "reason": "failure_sync_wait_timeout"}
             
-            if resolved_sync_step_result:
+            if resolved_sync_step_result: # If the synchronous step was resolved (either by response or timeout)
                 log(f"[{self.name}] Resuming sequence. Sync step '{sync_step_details_from_invoke['skill_action_requested']}' resolved. Outcome: {resolved_sync_step_result['outcome']}.")
                 cap_inputs_for_resume = {
                     "resuming_sequence_after_sync_step": True,
                     "sequence_state_for_resume": pending_seq_info, 
                     "resolved_sync_step_result": resolved_sync_step_result
                 }
-                del self.state['pending_sequence_state'] 
-                
+                # Clear the pending state *before* executing the capability that might set it again if it also pauses.
+                del self.state['pending_sequence_state']
+                 
                 initial_rl_state_for_seq_resume = self._get_rl_state_representation()
                 resumed_sequence_result = self._execute_capability("sequence_executor_v1", context, knowledge, all_agent_names_in_system, **cap_inputs_for_resume)
                 self._update_state_after_action(initial_rl_state_for_seq_resume, "sequence_executor_v1", resumed_sequence_result)
-            return 
+            # If resolved_sync_step_result is None, it means we are still waiting for the sync step, so return to avoid further actions this tick.
+            else:
+                log(f"[{self.name}] Still waiting for synchronous step in sequence (ReqID: {request_id_to_check}). Skipping further actions this tick.", level="DEBUG")
+                return
+
+        # --- Behavior Mode Switching Logic ---
+        if self.behavior_mode == "explore":
+            overall_avg_reward = self.capability_performance_tracker.get_overall_average_reward()
+            total_attempts = sum(stats.get("attempts", 0) for stats in self.capability_performance_tracker.get_all_performance_stats().values())
+
+            if total_attempts >= config.TASK_AGENT_MIN_EXECS_FOR_EXPLOIT and overall_avg_reward >= config.TASK_AGENT_MIN_AVG_REWARD_FOR_EXPLOIT:
+                log(f"[{self.name} Tick:{current_sim_tick}] Switching behavior mode from 'explore' to 'exploit'. Executions: {total_attempts}, Avg Reward: {overall_avg_reward:.2f}", level="INFO")
+                self.behavior_mode = "exploit"
+                self.memory.log_tick({"tick": current_sim_tick, "action": "behavior_mode_switch", "old_mode": "explore", "new_mode": "exploit", "trigger_metrics": {"executions": total_attempts, "average_reward": overall_avg_reward}})
         
         log(f"[{self.name} ID:{self.id} Tick:{current_sim_tick} Gen:{self.generation} Mode:{self.behavior_mode} Caps:{len(self.capabilities)}] TaskAgent run. Energy: {self.energy:.2f}", level="DEBUG")
         
@@ -796,6 +779,8 @@ class TaskAgent(BaseAgent):
         action_selection_reason = "rl_system"
         log(f"[{self.name} Tick:{current_sim_tick}] Current Goal: {self.current_goal.get('type')}. Details: {str(self.current_goal.get('details', {}))[:100]}", level="DEBUG")
 
+        # --- Goal-Driven Action Selection (Prioritized) ---
+        # Handle the 'user_defined_goal' goal type (Entry Point)
         if self.current_goal.get("type") == "execute_llm_generated_plan":
             plan_details = self.current_goal.get("details", {})
             plan_to_execute = plan_details.get("plan_to_execute")
@@ -810,7 +795,10 @@ class TaskAgent(BaseAgent):
                     "stop_on_failure": True
                 }
                 action_selection_reason = "executing_llm_generated_plan"
-                self.current_goal = {"type": "idle", "reason": "llm_plan_execution_underway"}
+                # The goal is consumed by selecting this capability.
+                # If sequence_executor_v1 pauses, it will set its own pending state.
+                # Otherwise, the goal is done.
+                self.current_goal = {"type": "idle", "reason": "llm_plan_execution_initiated"}
             elif not self.has_capability("sequence_executor_v1"):
                 log(f"[{self.name}] Cannot execute LLM plan: 'sequence_executor_v1' capability missing.", level="ERROR")
                 self.current_goal = {"type": "idle", "reason": "llm_plan_execution_failed_no_sequence_executor"}
@@ -818,25 +806,51 @@ class TaskAgent(BaseAgent):
                 log(f"[{self.name}] LLM plan execution failed: No plan or invalid plan in goal details for 'execute_llm_generated_plan'.", level="ERROR")
                 self.current_goal = {"type": "idle", "reason": "llm_plan_execution_failed_invalid_plan"}
         
-        if not chosen_capability_name and self.current_goal.get("type") == "user_defined_goal":
+        # This goal type primarily sets up the *next* state/goal, not the current tick's action,
+        # unless it's a conversational turn which is executed immediately.
+        elif not chosen_capability_name and self.current_goal.get("type") == "user_defined_goal":
             goal_description = self.current_goal.get('details', {}).get('description', '')
             if goal_description:
                 log(f"[{self.name}] Goal-driven choice: Processing 'user_defined_goal': '{goal_description}' by selecting LLM capability.", level="INFO")
+                # Acknowledge the goal in the GUI
+                ack_insight = {"diagnosing_agent_id": self.name, "root_cause_hypothesis": f"Received user goal: '{goal_description}'. Attempting to interpret...", "confidence": 0.95, "suggested_actions": ["LLM Interpretation"]}
+                if self.context_manager and hasattr(self.context_manager, 'display_system_insight'): # Use the correct method name
+                    self.context_manager.display_system_insight(ack_insight)
+
                 if self.has_capability("interpret_goal_with_llm_v1"):
-                    chosen_capability_name = "interpret_goal_with_llm_v1"
-                    action_selection_reason = "user_goal_llm_interpretation"
+                    # Set the goal to indicate interpretation is pending/needed
+                    self.set_goal({"type": "interpret_user_goal", "details": {"user_query": goal_description}})
+                    log(f"[{self.name}] Set goal to 'interpret_user_goal' for '{goal_description}'. RL will choose 'interpret_goal_with_llm_v1' next.", level="INFO")
+                    # Do NOT set chosen_capability_name here. The logic below for "interpret_user_goal" or RL will pick it up.
+
                 elif self.has_capability("conversational_exchange_llm_v1"):
-                    chosen_capability_name = "conversational_exchange_llm_v1"
+                    log(f"[{self.name}] No 'interpret_goal_with_llm_v1'. Using 'conversational_exchange_llm_v1' for user goal: '{goal_description}'", level="INFO")
+                    # Execute conversational exchange immediately as it's a single turn
+                    self._execute_conversational_goal(goal_description, context, knowledge, all_agent_names_in_system)
+                    chosen_capability_name = "conversational_exchange_llm_v1" # Mark as handled this tick
                     action_selection_reason = "user_goal_llm_conversation"
+                    # _execute_conversational_goal will set goal to idle.
                 else:
                     log(f"[{self.name}] Goal-driven choice: Has 'user_defined_goal' but no LLM capability (interpret or conversational). Will fall to RL/idle.", level="WARN")
                     self.current_goal = {"type": "idle", "reason": "missing_llm_capabilities_for_user_goal"}
             else:
                 log(f"[{self.name}] User goal has no description. Idling.", level="WARNING")
                 self.current_goal = {"type": "idle", "reason": "failed_no_user_goal_description"}
+      
+        # Handle the 'interpret_user_goal' goal type
+        # This goal type exists specifically to trigger the 'interpret_goal_with_llm_v1' capability.
+        elif not chosen_capability_name and self.current_goal.get("type") == "interpret_user_goal":
+            if self.has_capability("interpret_goal_with_llm_v1"):
+                log(f"[{self.name}] Goal-driven choice: Goal is 'interpret_user_goal'. Selecting 'interpret_goal_with_llm_v1'.", level="INFO")
+                chosen_capability_name = "interpret_goal_with_llm_v1"
+                action_selection_reason = "goal_driven_interpret_user_goal"
+                # Inputs will be prepared by input_preparer below.
+                # The goal remains 'interpret_user_goal' until the LLM response is processed by _update_state_after_action.
+            else:
+                log(f"[{self.name}] Goal 'interpret_user_goal' requires 'interpret_goal_with_llm_v1' capability, which is missing. Cannot execute.", level="ERROR")
+                self.current_goal = {"type": "idle", "reason": "missing_interpret_capability_for_goal"}
 
-
-        if "pending_skill_invocation" in self.state and self.state["pending_skill_invocation"]:
+        elif not chosen_capability_name and "pending_skill_invocation" in self.state and self.state["pending_skill_invocation"]:
             pending_skill_details = self.state.pop("pending_skill_invocation")
             
             if self.has_capability("invoke_skill_agent_v1"):
@@ -849,6 +863,8 @@ class TaskAgent(BaseAgent):
                 }
                 action_selection_reason = "llm_parsed_skill_invocation"
                 log(f"[{self.name}] State-driven choice: Acting on 'pending_skill_invocation'. Chose '{chosen_capability_name}' for action '{pending_skill_details.get('action')}'.")
+                # Goal remains idle as this was driven by internal state, not a top-level goal.
+                # If invoke_skill_agent_v1 is async, it will set its own pending state.
             else:
                 log(f"[{self.name}] Had pending_skill_invocation but missing 'invoke_skill_agent_v1' capability. Cannot execute.", level="ERROR")
                 self._report_symptom(
@@ -856,8 +872,9 @@ class TaskAgent(BaseAgent):
                     details_dict={"error": "invoke_skill_agent_v1 missing", "pending_details": pending_skill_details},
                     severity="error"
                 )
-        elif not chosen_capability_name and self.current_goal.get("type") == "investigate_symptoms":
-            log(f"[{self.name}] Goal-driven choice: Goal is 'investigate_symptoms'. Letting RL choose next action.", level="DEBUG")
+        # Handle 'investigate_symptoms' goal type
+        elif not chosen_capability_name and self.current_goal.get("type") == "investigate_symptoms" and not self.last_diagnosis: # Only if no diagnosis is pending action
+            log(f"[{self.name}] Goal-driven choice: Goal is 'investigate_symptoms'. Letting RL choose next action (e.g., knowledge_retrieval or triangulated_insight).", level="DEBUG")
         elif self.current_goal.get("type") == "investigate_symptoms" and self.last_diagnosis:
             log(f"[{self.name}] Goal is 'investigate_symptoms' and has a last_diagnosis: {self.last_diagnosis.get('diagnosis_id')}")
             suggested_actions = self.last_diagnosis.get("suggested_action_flags", [])
@@ -871,7 +888,9 @@ class TaskAgent(BaseAgent):
             if chosen_capability_name:
                 self.last_diagnosis = None 
                 log(f"[{self.name}] Cleared last_diagnosis after acting on it.")
-        elif not chosen_capability_name and self.current_goal.get("type") == "generic_task":
+                self.current_goal = {"type": "idle", "reason": "acted_on_diagnosis_suggestion"}
+        # Handle 'generic_task' goal type (internal execution)
+        elif not chosen_capability_name and self.current_goal.get("type") == "generic_task": 
             log(f"[{self.name}] Goal-driven choice: Performing 'generic_task': {self.current_goal.get('details')}", level="DEBUG")
             if random.random() < self.generic_task_failure_rate: 
                  failure_details = {
@@ -886,7 +905,8 @@ class TaskAgent(BaseAgent):
                 self.set_goal({"type": "idle", "reason": "generic_task_complete"})
             chosen_capability_name = "internal_generic_task_execution" 
 
-        if not chosen_capability_name:
+        # --- RL-Driven Action Selection (Fallback) ---
+        if not chosen_capability_name: # If no goal-driven action was selected
             current_rl_state = self._get_rl_state_representation()
             available_caps = self.available_capabilities()
             
@@ -898,16 +918,21 @@ class TaskAgent(BaseAgent):
             )
             action_selection_reason = f"rl_system_{exploration_method}"
             log(f"[{self.name}] RL-driven choice: Chosen capability '{chosen_capability_name}' via {exploration_method}. Available: {available_caps}", level="DEBUG")
-        
+
+        # --- Input Preparation (if a capability was chosen and inputs weren't set by goal logic) ---        
         if chosen_capability_name and chosen_capability_name != "internal_generic_task_execution":
-            cap_inputs_for_execution = self.input_preparer.prepare_inputs(
-                agent=self, 
-                cap_name_to_prep=chosen_capability_name,
-                context=context,
-                knowledge=knowledge,
-                all_agent_names_in_system=all_agent_names_in_system,
-                agent_info_map=agent_info_map
-            )
+            # Only prepare inputs if they weren't already set by specific goal-driven logic
+            if not cap_inputs_for_execution: # Check if cap_inputs_for_execution is still empty
+                cap_inputs_for_execution = self.input_preparer.prepare_inputs(
+                    agent=self, 
+                    cap_name_to_prep=chosen_capability_name,
+                    context=context,
+                    knowledge=knowledge,
+                    all_agent_names_in_system=all_agent_names_in_system,
+                    agent_info_map=agent_info_map
+                )
+                log(f"[{self.name}] Input preparation called for '{chosen_capability_name}'. Prepared inputs: {str(cap_inputs_for_execution)[:100]}", level="DEBUG")
+
 
         if chosen_capability_name:
             if chosen_capability_name == "internal_generic_task_execution":
@@ -1020,7 +1045,30 @@ class TaskAgent(BaseAgent):
             self.last_diagnosis = result["diagnosis"]
             log(f"[{self.name}] Updated last_diagnosis from '{executed_capability}' result: {self.last_diagnosis.get('diagnosis_id')}")
 
-        if is_success and self.current_goal.get("type") not in ["idle", "investigate_symptoms"]:
-            if executed_capability.startswith(self.current_goal.get("type", "").split("_")[0]):
-                log(f"[{self.name}] Goal '{self.current_goal.get('type')}' likely completed by action '{executed_capability}'. Setting to idle.", level="INFO")
-                self.current_goal = {"type": "idle", "reason": f"goal_completed_by_{executed_capability}"}
+    def _execute_conversational_goal(self, goal_description: str, context: 'ContextManager', knowledge: 'KnowledgeBase', all_agent_names_in_system: List[str]):
+        """Helper method to execute the conversational exchange capability directly."""
+        current_tick = self.context_manager.get_tick()
+        log(f"[{self.name}] Executing conversational exchange for user goal: '{goal_description}'", level="INFO")
+
+        cap_inputs_for_convo = {
+            "user_input_text": goal_description,
+            "conversation_history": self.conversation_history,
+            "system_prompt": f"You are an AI assistant named {self.name}. The current simulation tick is {self.context_manager.get_tick()}."
+        }
+        initial_rl_state_for_convo = self._get_rl_state_representation()
+
+        # Execute the capability directly
+        convo_result = self._execute_capability(
+            "conversational_exchange_llm_v1",
+            context,
+            knowledge,
+            all_agent_names_in_system,
+            **cap_inputs_for_convo
+        )
+
+        # Update state and RL based on the result
+        self._update_state_after_action(initial_rl_state_for_convo, "conversational_exchange_llm_v1", convo_result)
+
+        # After conversational turn, set goal back to idle
+        self.current_goal = {"type": "idle", "reason": "conversational_exchange_complete"}
+        log(f"[{self.name}] Conversational exchange complete. Goal set to idle.", level="INFO")

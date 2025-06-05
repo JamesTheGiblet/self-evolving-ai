@@ -28,7 +28,7 @@ def execute_invoke_skill_agent_v1(agent: 'BaseAgent', params_used: dict, cap_inp
         log_suffix_decision = "(from agent_params)" if final_skill_action_to_request else ""
         if not final_skill_action_to_request:
             globally_preferable_skill_actions = [
-                "maths_operation", "log_summary", "complexity",
+                "maths_operation", "log_summary", "complexity_analysis", # Align with CapabilityInputPreparer
                 "web_operation", "file_operation", "api_call"
             ]
             action_weights = [1.0] * len(globally_preferable_skill_actions)
@@ -83,8 +83,9 @@ def execute_invoke_skill_agent_v1(agent: 'BaseAgent', params_used: dict, cap_inp
         specific_command_for_lookup = temp_request_data_for_lookup.get("web_command", "").split(' ')[0]
     elif final_skill_action_to_request == "api_call":
         specific_command_for_lookup = temp_request_data_for_lookup.get("api_command", "").split(' ')[0]
-    elif final_skill_action_to_request in ["log_summary", "complexity", "basic_stats"]: # These are specific commands
-        specific_command_for_lookup = final_skill_action_to_request
+    elif final_skill_action_to_request in ["log_summary", "complexity_analysis", "basic_stats_analysis"]: # Match skill tool commands
+        specific_command_for_lookup = final_skill_action_to_request # The category name is the command
+
 
     if not specific_command_for_lookup:
         log(f"[{agent.name}] InvokeSkill: Could not determine specific command for lookup from category '{final_skill_action_to_request}' and data {temp_request_data_for_lookup}.", level="ERROR")
@@ -146,9 +147,10 @@ def execute_invoke_skill_agent_v1(agent: 'BaseAgent', params_used: dict, cap_inp
         final_request_data["file_command"] = command_to_send
     elif final_skill_action_to_request == "api_call" and "api_command" not in final_request_data:
         final_request_data["api_command"] = random.choice(["get_joke", "get_weather 34.05 -118.24"])
-    elif final_skill_action_to_request in ["log_summary", "complexity"] :
+    elif final_skill_action_to_request in ["log_summary", "complexity_analysis", "basic_stats_analysis"] :
         if "data_points" not in final_request_data: final_request_data["data_points"] = [] 
-        if "analysis_type" not in final_request_data : final_request_data["analysis_type"] = final_skill_action_to_request
+        # Ensure analysis_type in request_data matches the skill_action_to_request for these specific actions
+        final_request_data["analysis_type"] = final_skill_action_to_request
 
     timeout_duration = cap_inputs.get("timeout_duration", params_used.get("timeout_duration", 5.0))
     success_reward = cap_inputs.get("success_reward", params_used.get("success_reward", 0.75))

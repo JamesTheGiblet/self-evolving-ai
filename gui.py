@@ -4,12 +4,13 @@ import customtkinter as ctk
 import threading
 import logging # For GUI log handler
 import time
+import _tkinter  # <-- Add this import for TclError
 from typing import Any, Dict, List, Optional # Import necessary types
 from utils.logger import log as gui_log # Using your existing logger
 import config # To access MAIN_LOOP_SLEEP
 
 
-class GUITextHandler(logging.Handler):
+class GUITextHandler(logging.Handler): # Moved this class definition up
     """A custom logging handler that directs logs to a CTkTextbox widget."""
     def __init__(self, textbox_widget):
         super().__init__()
@@ -27,6 +28,7 @@ class GUITextHandler(logging.Handler):
 class SimulationGUI(ctk.CTk):
     def __init__(self, context_manager, meta_agent, mutation_engine, knowledge_base):
         super().__init__()
+        self._is_closing = False # Flag to indicate if the GUI is in the process of closing
 
         self.title("Self-Evolving AI Monitor")
         self.geometry("950x850") # Further Increased size for new section
@@ -73,11 +75,15 @@ class SimulationGUI(ctk.CTk):
         self.kb_size_label.grid(row=content_start_row + 3, column=0, pady=2, padx=10, sticky="w")
 
         # --- Visualizations Area (New Column) ---
-        from gui_visualizations import AgentMapFrame, MemoryStreamFrame, KnowledgeInjectionFrame, KnowledgeQueryFrame, AgentSummaryFrame
-        self.agent_map_frame = AgentMapFrame(self, meta_agent=self.meta_agent)
-        self.agent_map_frame.grid(row=content_start_row, column=1, rowspan=4, pady=(0,5), padx=10, sticky="nsew") # Starts at row 2, spans 4 rows
+        # Import all visualization frames needed
+        from gui_visualizations import AgentMapFrame, MemoryStreamFrame, KnowledgeInjectionFrame, KnowledgeQueryFrame, AgentSummaryFrame, SystemMetricsChartFrame
 
-        # Memory Stream Frame
+        # System Metrics Chart Frame (New)
+        self.system_metrics_chart_frame = SystemMetricsChartFrame(self, context_manager=self.context_manager, mutation_engine=self.mutation_engine)
+        self.system_metrics_chart_frame.grid(row=content_start_row, column=1, rowspan=4, pady=(0,5), padx=10, sticky="nsew") # Starts at row 2, spans 4 rows
+
+        # Agent Map Frame (Adjusted row/rowspan)
+        self.agent_map_frame = AgentMapFrame(self, meta_agent=self.meta_agent)
         self.memory_stream_frame = MemoryStreamFrame(self, knowledge_base=self.knowledge_base, context_manager=self.context_manager)
         self.memory_stream_frame.grid(row=content_start_row + 4, column=1, rowspan=6, pady=(5,10), padx=10, sticky="nsew") # Below AgentMapFrame
 
@@ -194,11 +200,19 @@ class SimulationGUI(ctk.CTk):
 
     def log_to_gui(self, message):
         """Safely appends a message to the log_textbox from any thread."""
+        if self._is_closing: # Don't attempt to log if GUI is shutting down
+            # Fallback to console print if GUI log is unavailable during shutdown
+            print(f"GUI_LOG_SKIPPED (closing): {message}")
+            return
+
         def _append_log():
+            # Double check here as well, as the 'after' might execute late
+            if self._is_closing or not self.winfo_exists() or not hasattr(self, 'log_textbox') or not self.log_textbox.winfo_exists():
+                return
             self.log_textbox.configure(state="normal")
             self.log_textbox.insert("end", message + "\n")
             self.log_textbox.configure(state="disabled")
-            self.log_textbox.see("end") # Scroll to the end
+            self.log_textbox.see("end")
 
         if threading.current_thread() != threading.main_thread():
             self.after(0, _append_log)
@@ -213,15 +227,23 @@ class SimulationGUI(ctk.CTk):
 
     def update_ui_elements(self):
         """Updates UI elements with current simulation data."""
-        gui_log(f"[GUI DEBUG] update_ui_elements called. Sim running: {self.simulation_running}. Refs set: {self.context_manager is not None}", level="DEBUG")
-        
-        current_tick_for_debug = "N/A"
-        if self.context_manager: 
-            current_tick_for_debug = self.context_manager.get_tick()
-        gui_log(f"[GUI DEBUG] Current tick for UI update: {current_tick_for_debug}", level="DEBUG")
+        if self._is_closing or not self.winfo_exists():
+            return
 
-        if self.context_manager and self.meta_agent and self.mutation_engine and self.knowledge_base:
-            # Update System Name
+        try:
+            current_tick_for_debug = "N/A"
+            if self.context_manager:
+                current_tick_for_debug = self.context_manager.get_tick()
+            # gui_log(f"[GUI DEBUG] Current tick for UI update: {current_tick_for_debug}", level="DEBUG") # Can be noisy
+
+            if not (self.context_manager and self.meta_agent and self.mutation_engine and self.knowledge_base):
+                if self.simulation_running and not self._is_closing and self.winfo_exists():
+                    self.after(500, self.update_ui_elements)
+                return
+
+            # Proceed with UI updates if components are available
+
+            # Update System Name (moved inside try)
             identity_info = self.meta_agent.identity_engine.get_identity()
             # Ensure identity_info is a dictionary before using .get()
             if not isinstance(identity_info, dict):
@@ -250,15 +272,21 @@ class SimulationGUI(ctk.CTk):
             self.kb_size_label.configure(text=f"KB Size: {kb_size}")
 
             # Update the new visualization frames
-            self.agent_map_frame.update_display()
-            self.memory_stream_frame.update_display()
-            self.agent_summary_frame.update_display() # Update the agent summary list
+            if hasattr(self, 'agent_map_frame') and self.agent_map_frame.winfo_exists(): self.agent_map_frame.update_display()
+            if hasattr(self, 'memory_stream_frame') and self.memory_stream_frame.winfo_exists(): self.memory_stream_frame.update_display()
+            if hasattr(self, 'agent_summary_frame') and self.agent_summary_frame.winfo_exists(): self.agent_summary_frame.update_display()
+            
+            # Update the new chart frame
+            if hasattr(self, 'system_metrics_chart_frame') and self.system_metrics_chart_frame.winfo_exists(): self.system_metrics_chart_frame.update_display()
 
-        if self.simulation_running:
-            gui_log(f"[GUI DEBUG] Rescheduling update_ui_elements for tick {current_tick_for_debug}.", level="DEBUG")
+        except _tkinter.TclError as e:
+            # Log only if not expecting closure, to reduce noise during normal shutdown
+            if not self._is_closing:
+                gui_log(f"TclError in update_ui_elements: {e}", level="WARN")
+            return # Stop further processing and rescheduling if TclError occurs
+
+        if self.simulation_running and not self._is_closing: # Only reschedule if not closing
             self.after(500, self.update_ui_elements) 
-        else:
-            gui_log(f"[GUI DEBUG] NOT rescheduling update_ui_elements. Sim running: {self.simulation_running}. Current tick: {current_tick_for_debug}", level="DEBUG")
 
     def submit_feedback(self, feedback_type):
         """Submits user feedback to the simulation."""
@@ -303,21 +331,36 @@ class SimulationGUI(ctk.CTk):
 
     def display_system_insight(self, insight_data: dict):
         """Displays a system-generated insight or notification in the GUI."""
-        def _append_insight():
-            if insight_data is None:
-                return
+        if self._is_closing or not self.winfo_exists():
+            print(f"INSIGHT_SKIPPED (closing): {insight_data.get('root_cause_hypothesis', 'N/A')}")
+            return
 
-            self.insights_textbox.configure(state="normal")
-            formatted_insight = f"--- Insight/Notification (Tick: {insight_data.get('tick', 'N/A')}) ---\n"
-            formatted_insight += f"Agent: {insight_data.get('diagnosing_agent_id', 'System')}\n"
-            formatted_insight += f"Hypothesis: {insight_data.get('root_cause_hypothesis', 'N/A')}\n"
-            formatted_insight += f"Confidence: {insight_data.get('confidence', 'N/A'):.2f}\n"
-            if insight_data.get('suggested_actions'):
-                formatted_insight += f"Suggested Actions: {', '.join(insight_data.get('suggested_actions'))}\n"
-            formatted_insight += "-------------------------------------------\n\n"
-            self.insights_textbox.insert("end", formatted_insight)
-            self.insights_textbox.configure(state="disabled")
-            self.insights_textbox.see("end")
+        def _append_insight():
+            if self._is_closing or not self.winfo_exists() or \
+               not hasattr(self, 'insights_textbox') or not self.insights_textbox.winfo_exists():
+                return
+            
+            try:
+                if insight_data is None:
+                    return
+
+                self.insights_textbox.configure(state="normal")
+                formatted_insight = f"--- Insight/Notification (Tick: {insight_data.get('tick', 'N/A')}) ---\n"
+                formatted_insight += f"Agent: {insight_data.get('diagnosing_agent_id', 'System')}\n"
+                formatted_insight += f"Hypothesis: {insight_data.get('root_cause_hypothesis', 'N/A')}\n"
+                formatted_insight += f"Confidence: {insight_data.get('confidence', 'N/A'):.2f}\n"
+                if insight_data.get('suggested_actions'):
+                    formatted_insight += f"Suggested Actions: {', '.join(insight_data.get('suggested_actions'))}\n"
+                formatted_insight += "-------------------------------------------\n\n"
+                self.insights_textbox.insert("end", formatted_insight)
+                self.insights_textbox.configure(state="disabled")
+                self.insights_textbox.see("end")
+            except _tkinter.TclError as e:
+                # If GUI is closing, this is expected. Don't log an error, just print.
+                if not self._is_closing:
+                    gui_log(f"TclError in _append_insight: {e}", level="WARN")
+                else:
+                    print(f"TclError in _append_insight (GUI closing): {e}")
 
         if threading.current_thread() != threading.main_thread():
             self.after(0, _append_insight)
@@ -364,11 +407,22 @@ class SimulationGUI(ctk.CTk):
                 gui_log("Simulation thread: ContextManager stop request completed.", level="INFO")
             
             def _finalize_stop_ui():
-                gui_log("Simulation thread: Scheduling final UI updates on main thread.", level="DEBUG")
+                if self._is_closing or not self.winfo_exists():
+                    gui_log("GUI is closing/destroyed, skipping _finalize_stop_ui's UI updates.", level="DEBUG")
+                    self.simulation_running = False # Still update non-UI state
+                    return
+
+                gui_log("Simulation thread: Executing _finalize_stop_ui on main thread.", level="DEBUG")
                 self.simulation_running = False
-                self.update_button_states()
-                self.update_ui_elements()
-            self.after(0, _finalize_stop_ui)
+                self.update_button_states() # Guarded internally
+                self.update_ui_elements()   # Guarded internally
+            
+            if not self._is_closing: # Only schedule if GUI is not already in the process of closing
+                self.after(0, _finalize_stop_ui)
+            else:
+                self.simulation_running = False # Ensure state is updated
+                gui_log("GUI already closing, _finalize_stop_ui not scheduled. Set simulation_running=False.", level="DEBUG")
+
             gui_log("Simulation thread: Finalization complete. Thread is now finishing.", level="INFO")
             
     def start_simulation(self):
@@ -413,28 +467,46 @@ class SimulationGUI(ctk.CTk):
             self.after(0, self.update_button_states)
 
     def update_button_states(self):
-        if self.simulation_running:
-            self.start_button.configure(state="disabled")
-            if self.simulation_thread and self.simulation_thread.is_alive() or \
-               (self.context_manager and self.context_manager.is_running()):
-                self.stop_button.configure(state="normal")
-            else: 
-                self.stop_button.configure(state="disabled")
-        else:
-            self.start_button.configure(state="normal")
-            self.stop_button.configure(state="disabled")
+        if self._is_closing or not self.winfo_exists():
+            return
+
+        try:
+            if self.simulation_running:
+                if hasattr(self, 'start_button') and self.start_button.winfo_exists():
+                    self.start_button.configure(state="disabled")
+                if hasattr(self, 'stop_button') and self.stop_button.winfo_exists():
+                    context_is_running = self.context_manager and self.context_manager.is_running()
+                    if self.simulation_thread and self.simulation_thread.is_alive() or context_is_running:
+                        self.stop_button.configure(state="normal")
+                    else: 
+                        self.stop_button.configure(state="disabled")
+            else:
+                if hasattr(self, 'start_button') and self.start_button.winfo_exists():
+                    self.start_button.configure(state="normal")
+                if hasattr(self, 'stop_button') and self.stop_button.winfo_exists():
+                    self.stop_button.configure(state="disabled")
+        except _tkinter.TclError as e:
+            gui_log(f"TclError in update_button_states (likely during shutdown): {e}", level="WARN")
+        except Exception as e: # Catch any other unexpected errors
+            gui_log(f"Unexpected error in update_button_states: {e}", level="ERROR", exc_info=True)
 
     def on_closing(self):
+        if self._is_closing: # Prevent re-entry if already closing
+            return
+        self._is_closing = True # Set the flag immediately
+
         gui_log("GUI closing sequence started.")
         self.stop_simulation() 
 
         if self.simulation_thread and self.simulation_thread.is_alive():
             gui_log("Waiting for simulation thread to join...")
             join_timeout = config.TICK_INTERVAL * 4 if config.TICK_INTERVAL > 0 else 2.0 
-            join_timeout = max(join_timeout, 2.0) 
+            join_timeout = max(join_timeout, 2.0) # Ensure at least 2 seconds
             self.simulation_thread.join(timeout=join_timeout)
             if self.simulation_thread.is_alive():
                 gui_log("Simulation thread did not join in time. It may be blocked.", level="WARN")
+                # As a last resort, if the thread is stuck and context manager is running, try to stop it.
+                # This is risky if the thread is holding locks or in a critical section.
                 if self.context_manager and self.context_manager.is_running():
                     gui_log("Fallback: Forcing ContextManager stop as thread is unresponsive.", level="WARN")
                     self.context_manager.stop()
@@ -444,8 +516,11 @@ class SimulationGUI(ctk.CTk):
                 self.context_manager.stop()
 
         if hasattr(self, 'gui_log_handler') and self.gui_log_handler:
-            logging.getLogger().removeHandler(self.gui_log_handler) 
-            self.gui_log_handler = None 
+            # Check if logger and handler still exist
+            root_logger = logging.getLogger()
+            if self.gui_log_handler in root_logger.handlers:
+                root_logger.removeHandler(self.gui_log_handler)
+            self.gui_log_handler = None
 
         gui_log("Destroying GUI window.") 
         self.destroy()
