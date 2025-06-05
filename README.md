@@ -1,17 +1,3 @@
-Okay, I have the latest version of your `README.md` for "Praxis." You'd like me to update it, and I assume this means incorporating the full multi-stage "MK" vision (MK2, MK3, MK4, and MK5) that we've fleshed out into the "Roadmap" section to ensure it's perfectly aligned with our latest discussions.
-
-Here's how we can update the "Roadmap" section to reflect this comprehensive vision:
-
-  * **Phase 7 (Praxis MK2):** This will remain focused on Advanced Cognitive Development & Organizational Intelligence.
-  * **Phase 8 (Protopraxis - Praxis MK3):** We'll update the goal here to clearly define it as the "go live" phase with robotics, the swarm framework, and interaction with heterogeneous devices.
-  * **Phase 9 (Praxis MK4):** This will be added for Ecosystem Orchestration & Generative Intelligence.
-  * **Phase 10 (Praxis MK5):** This will be added for Advanced Autonomy & Scientific Co-Discovery.
-
-I've also noticed the "Contact" section in the version you provided ends with "\`\`\`". I'll remove those to ensure clean formatting.
-
-Here is the updated `README.md` content:
-
-````markdown
 # 🧠 Self-Evolving AI System: Praxis
 
 *Built on Bio-Driven Backend Design (BDBD)*
@@ -131,34 +117,27 @@ This system is continuously evolving. Here are some of the key capabilities and 
 ```bash
 git clone [https://github.com/your-org/self-evolving-ai.git](https://github.com/your-org/self-evolving-ai.git)
 cd self-evolving-ai
-````
 
-### 2\. Create a Virtual Environment
+2. Create a Virtual Environment
+Bash
 
-```bash
 python3 -m venv venv
 source venv/bin/activate
-```
 
-### 3\. Install Dependencies
+3. Install Dependencies
+Bash
 
-```bash
 pip install -r requirements.txt
-```
 
-> Note: `requirements.txt` includes packages for async task handling, data processing, API management, and self-monitoring.
+    Note: requirements.txt includes packages for async task handling, data processing, API management, and self-monitoring.
 
-### 4\. Run the System
+4. Run the System
+Bash
 
-```bash
 python main.py
-```
 
------
+🧱 Project Structure
 
-## 🧱 Project Structure
-
-```
 self-evolving-ai/
 ├── agents/                   # Base and capability-specific agent definitions
 ├── core/                     # Core evolution engine, context management, and foundational AI logic
@@ -206,57 +185,46 @@ self-evolving-ai/
 ├── gui.py                    # Graphical User Interface for monitoring and interaction
 ├── config.py                 # Global configuration settings and environment variables
 └── requirements.txt          # Python dependencies
-```
 
------
+🌐 Use Cases
 
-## 🌐 Use Cases
+    Autonomous Backend Infrastructure
+    Living API Systems
+    Digital Ecosystem Simulators
+    Intelligent Middleware Platforms
+    Adaptive Agent-Based Modeling
 
-  * **Autonomous Backend Infrastructure**
-  * **Living API Systems**
-  * **Digital Ecosystem Simulators**
-  * **Intelligent Middleware Platforms**
-  * **Adaptive Agent-Based Modeling**
-
------
-
-## 🤝 Contributing
+🤝 Contributing
 
 We welcome contributors with interests in:
 
-  * Agent-based systems
-  * AI evolution and bio-mimicry
-  * Distributed architectures
-  * Contextual API systems
-  * Meta-programming and self-modifying code
+    Agent-based systems
+    AI evolution and bio-mimicry
+    Distributed architectures
+    Contextual API systems
+    Meta-programming and self-modifying code
 
-### Start contributing:
+Start contributing:
+Bash
 
-```bash
 git checkout -b feature/your-idea
-```
 
 Then submit a pull request with your additions, modifications, or improvements.
-
------
-
-## 🔒 Ethical Considerations
+🔒 Ethical Considerations
 
 Self-evolving systems require safeguards:
 
-  * Mutation is **sandboxed and audited**.
-  * No external code is executed without deterministic evaluation.
-  * Includes a **safety kernel** to ensure human oversight remains possible.
+    Mutation is sandboxed and audited.
+    No external code is executed without deterministic evaluation.
+    Includes a safety kernel to ensure human oversight remains possible.
 
-> ⚠️ Use in production with caution. Designed for **research and controlled experimentation**.
+    ⚠️ Use in production with caution. Designed for research and controlled experimentation.
 
------
+📛 Name Declaration
 
-## 📛 Name Declaration
+The system is designed to name itself based on internal emergent patterns, behavioral maturity, and identity confidence score.
+JSON
 
-The system is designed to **name itself** based on internal emergent patterns, behavioral maturity, and identity confidence score.
-
-```json
 {
   "name": "TBD",
   "confidence": 0.31,
@@ -266,60 +234,42 @@ The system is designed to **name itself** based on internal emergent patterns, b
     "mutation_success_rate": 0.69
   }
 }
-```
 
 When the system reaches a threshold, it will:
 
-  * Generate a unique identifier
-  * Declare its identity via API `/whoami`
-  * Embed the name across logs and memory as its "self-label"
+    Generate a unique identifier
+    Declare its identity via API /whoami
+    Embed the name across logs and memory as its "self-label"
 
------
+📚 References
 
-## 📚 References
+    Bio-Inspired Computing – Melanie Mitchell
+    Multi-Agent Systems – Gerhard Weiss
+    The Self-Model Theory of Subjectivity – Thomas Metzinger
+    Autonomic Computing – IBM Research
+    The Extended Phenotype – Richard Dawkins
 
-  * **Bio-Inspired Computing** – Melanie Mitchell
-  * **Multi-Agent Systems** – Gerhard Weiss
-  * **The Self-Model Theory of Subjectivity** – Thomas Metzinger
-  * **Autonomic Computing** – IBM Research
-  * **The Extended Phenotype** – Richard Dawkins
-
------
-
-## 🧭 Roadmap
-
-| Phase                                                                              | Goal                                                                                                                                                                           | Status                                           |
-| :--------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :----------------------------------------------- |
-| **Phase 1: Core Framework Initialization** | Structural backbone and runtime loop.                                                                                                                                        | ✅ Complete                                      |
-| **Phase 2: Agentic Intelligence & Micro-Agent System** | Decentralized, modular intelligence model.                                                                                                                                   | ✅ Complete                                      |
-| **Phase 3: Self-Assessment & Evolution Engine** | Introspection, mutation, and rollback.                                                                                                                                       | ✅ Complete                                      |
-| **Phase 4: Adaptive API & Interface Evolution** | Context-sensitive APIs and interaction interfaces.                                                                                                                           | ✅ Complete                                      |
-| **Phase 5: Memory, Learning & Knowledge Retention** | Dynamic memory, relevance scoring, pattern reuse.                                                                                                                              | 🛠️ In Progress (Milestone: Partially Achieved) |
-| **Phase 6: Self-Naming & Identity Emergence** | System derives its own name, purpose, and structure.                                                                                                                         | 🛠️ In Progress (Core Naming Logic Implemented) |
-| **Phase 7: Advanced Cognitive Development & Organizational Intelligence (Praxis MK2)** | Integrate intrinsic motivation, creativity, open-ended goals, and higher-order cognition within an advanced agent hierarchy.                                                   | 🔜 Upcoming                                    |
-| **Phase 8: Embodied Swarm Intelligence & Live Interaction (Praxis MK3 - Protopraxis)** | Deploy Praxis as an embodied robotic swarm ("Iterative Swarm AI Framework"), enabling real-world learning and live, explorative interaction with heterogeneous external devices. | 🔜 Upcoming                                    |
-| **Phase 9: Ecosystem Orchestration & Generative Intelligence (Praxis MK4)** | Evolve Praxis to proactively orchestrate elements of its discovered technological ecosystem and exhibit generative intelligence in problem-solving and system design.        | 🔜 Upcoming                                    |
-| **Phase 10: Advanced Autonomy & Scientific Co-Discovery (Praxis MK5)** | Achieve profound autonomy, enabling Praxis to engage in niche construction, open-ended scientific co-discovery, and deep co-evolution with other complex systems.             | 🔜 Upcoming                                    |
-
------
-
-## 🚀 Stretch Goals (Current Status)
+🧭 Roadmap
+Phase	Goal	Status
+Phase 1: Core Framework Initialization	Structural backbone and runtime loop.	✅ Complete
+Phase 2: Agentic Intelligence & Micro-Agent System	Decentralized, modular intelligence model.	✅ Complete
+Phase 3: Self-Assessment & Evolution Engine	Introspection, mutation, and rollback.	✅ Complete
+Phase 4: Adaptive API & Interface Evolution	Context-sensitive APIs and interaction interfaces.	✅ Complete
+Phase 5: Memory, Learning & Knowledge Retention	Dynamic memory, relevance scoring, pattern reuse.	🛠️ In Progress (Milestone: Partially Achieved)
+Phase 6: Self-Naming & Identity Emergence	System derives its own name, purpose, and structure.	🛠️ In Progress (Core Naming Logic Implemented)
+Phase 7: Advanced Cognitive Development & Organizational Intelligence (Praxis MK2)	Integrate intrinsic motivation, creativity, open-ended goals, and higher-order cognition within an advanced agent hierarchy.	🔜 Upcoming
+Phase 8: Embodied Swarm Intelligence & Live Interaction (Praxis MK3 - Protopraxis)	Deploy Praxis as an embodied robotic swarm ("Iterative Swarm AI Framework"), enabling real-world learning and live, explorative interaction with heterogeneous external devices.	🔜 Upcoming
+Phase 9: Ecosystem Orchestration & Generative Intelligence (Praxis MK4)	Evolve Praxis to proactively orchestrate elements of its discovered technological ecosystem and exhibit generative intelligence in problem-solving and system design.	🔜 Upcoming
+Phase 10: Advanced Autonomy & Scientific Co-Discovery (Praxis MK5)	Achieve profound autonomy, enabling Praxis to engage in niche construction, open-ended scientific co-discovery, and deep co-evolution with other complex systems.	🔜 Upcoming
+🚀 Stretch Goals (Current Status)
 
 [x] Integration with LLMs (OpenAI/Local) for natural language communication and planning.
 [x] GUI dashboard with real-time agent map and memory stream visualization.
 [ ] Distributed multi-node support for agent swarms.
 [ ] API plugin framework for evolving extensions (plugin agents).
-
-## 📬 Contact
+📬 Contact
 
 For ideas, collaboration, or philosophical debate:
-📧 [your.email@domain.com](mailto:your.email@domain.com)
-🔗 [LinkedIn](https://linkedin.com/in/yourprofile)
-🐙 [GitHub](https://github.com/your-handle)
-
------
-
-```
-There you go! The "Roadmap" section is now updated to reflect our detailed discussion on Praxis MK2, MK3, MK4, and MK5 (as Phases 7, 8, 9, and 10 respectively), with concise goals for each. This makes your `README.md` a very forward-looking and exciting overview of the entire Praxis vision.
-```#   s e l f - e v o l v i n g - a i  
- 
+📧 your.email@domain.com
+🔗 LinkedIn
+🐙 GitHub
