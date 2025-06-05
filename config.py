@@ -18,15 +18,16 @@ DEFAULT_MAX_AGENT_AGE = 1000 # Default lifespan in ticks if not overridden
 DEFAULT_INITIAL_ENERGY = 100.0 # Default starting energy for agents
 BASE_TICK_ENERGY_COST = 0.05 # Small passive energy drain per tick for all agents
 
+# --- Configuration for Temporary Agents ---
+TEMP_AGENT_DEFAULT_MAX_AGE = 200  # Default lifespan in ticks for temporary agents (e.g., shorter than normal)
+TEMP_AGENT_DEFAULT_INITIAL_ENERGY = 50.0 # Default starting energy for temporary agents (e.g., less than normal)
+# -----------------------------------------
+
 # Task Agent Behavior Switching
 TASK_AGENT_MIN_EXECS_FOR_EXPLOIT = 10 # Minimum capability executions before considering switching from explore
 TASK_AGENT_MIN_AVG_REWARD_FOR_EXPLOIT = 0.1 # Minimum average reward required to switch from explore
 
 # LLM Configuration
-# OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY") # Deprecated
-# GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") # Deprecated (if it was ever used for API key directly)
-
-# Local LLM Configuration (e.g., for Ollama)
 LOCAL_LLM_API_BASE_URL = os.environ.get("LOCAL_LLM_API_BASE_URL", "http://localhost:11434/api/chat") # Default Ollama chat endpoint
 LOCAL_LLM_DEFAULT_MODEL = os.environ.get("LOCAL_LLM_DEFAULT_MODEL", "mistral") # If you pulled mistral
 DEFAULT_LLM_MODEL = LOCAL_LLM_DEFAULT_MODEL # Set the local model as the default for the system

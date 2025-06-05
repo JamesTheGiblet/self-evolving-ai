@@ -1,5 +1,6 @@
 # core/meta_agent.py
 from typing import Dict, List, Optional, Any, TYPE_CHECKING
+import uuid # Add if not already imported
 from core import context_manager
 from core.context_manager import ContextManager
 from core.skill_agent import SkillAgent
@@ -41,6 +42,10 @@ class MetaAgent:
         # Combined list for convenience, will be updated when agents are added/removed
         self.agents: List[Any] = list(self.task_agents) + list(self.skill_agents) 
         
+        if self.communication_bus:
+            self.communication_bus.register_agent(self.name) # Register MetaAgent by its name
+            log(f"MetaAgent '{self.name}' initialized and registered on communication bus.", level="INFO")
+
         self.identity_engine = identity_engine # Use the passed IdentityEngine instance
         
         self.default_task_agent_config = default_task_agent_config
@@ -126,8 +131,11 @@ class MetaAgent:
 
     def run_agents(self):
         """
+        Modified to include processing MetaAgent's own messages.
         Runs the operational cycle for all managed agents (Task and Skill).
         """
+        self._process_meta_agent_messages() # Process messages for MetaAgent actions
+
         current_tick = self.context.get_tick()
         log(f"[{self.name} Tick:{current_tick}] Running all agents. Task Agents: {len(self.task_agents)}, Skill Agents: {len(self.skill_agents)}", level="DEBUG")
 
@@ -175,6 +183,103 @@ class MetaAgent:
                 log(f"Error running SkillAgent {skill_agent.name}: {e}", level="ERROR", exc_info=True)
         
         log(f"[{self.name} Tick:{current_tick}] Finished running all agents.", level="DEBUG")
+
+    def _process_meta_agent_messages(self):
+        """
+        MetaAgent processes its own messages from the communication bus.
+        """
+        if not self.communication_bus:
+            return
+        
+        messages = self.communication_bus.get_messages_for_agent(self.name)
+        for msg_envelope in messages:
+            sender_id = msg_envelope.get('sender')
+            content = msg_envelope.get('content', {})
+            action = content.get('action')
+            message_id = msg_envelope.get('id')
+
+            if action == "provision_temporary_skill_agent":
+                lineage_id_to_provision = content.get('lineage_id')
+                requesting_agent_id = content.get('requesting_agent_id') # ID of the TaskAgent that made the request
+                original_request_details = content.get('original_request_details', {}) # For context or potential retry signalling
+
+                log(f"[{self.name}] Received request from '{requesting_agent_id}' to provision temporary skill agent for lineage '{lineage_id_to_provision}'.", level="INFO")
+                
+                provisioning_success = self._provision_temporary_skill_agent(
+                    lineage_id=lineage_id_to_provision,
+                    requesting_agent_id=requesting_agent_id,
+                    original_request_details=original_request_details
+                )
+                
+                # Optionally, send a status message back to the requesting TaskAgent
+                if requesting_agent_id:
+                    response_content = {
+                        "action": "provisioning_status_response",
+                        "lineage_id": lineage_id_to_provision,
+                        "provisioning_successful": provisioning_success,
+                        "original_request_details": original_request_details # Echo back for context
+                    }
+                    self.communication_bus.send_direct_message(self.name, requesting_agent_id, response_content)
+            
+            if message_id: # Ensure message_id is present before marking
+                self.communication_bus.mark_message_processed(message_id)
+
+    def _provision_temporary_skill_agent(self, lineage_id: str, requesting_agent_id: Optional[str] = None, original_request_details: Optional[Dict] = None) -> bool:
+        """
+        Provisions a new, potentially temporary, skill agent of the given lineage.
+        Returns True if successful, False otherwise.
+        """
+        if not lineage_id:
+            log(f"[{self.name}] Cannot provision skill agent: lineage_id is missing.", level="ERROR")
+            return False
+
+        default_config = self.default_skill_configs_by_lineage.get(lineage_id)
+        if not default_config:
+            log(f"[{self.name}] No default skill configuration found for lineage_id: '{lineage_id}'. Cannot provision.", level="ERROR")
+            return False
+
+        temp_agent_config = copy.deepcopy(default_config)
+        
+        current_time_tick = self.context.get_tick() if self.context else 0
+        temp_id_suffix = f"temp_{current_time_tick}_{uuid.uuid4().hex[:4]}"
+        
+        # Ensure the name is unique and reflects it's temporary
+        temp_agent_config["name"] = f"{lineage_id}-{temp_id_suffix}"
+        temp_agent_config["agent_id"] = temp_agent_config["name"]
+        temp_agent_config["generation"] = 0 # Or some indicator for temporary agents
+
+        # Use new config values for temporary agents
+        temp_agent_config["max_age"] = config.TEMP_AGENT_DEFAULT_MAX_AGE
+
+        # For initial_energy, SkillAgent's __init__ currently sets it to:
+        # config.DEFAULT_INITIAL_ENERGY * 0.5
+        # To use TEMP_AGENT_DEFAULT_INITIAL_ENERGY, we need to ensure SkillAgent's
+        # __init__ (or BaseAgent's __init__ via kwargs) can accept and prioritize
+        # an 'initial_energy' value passed in its configuration.
+        # Assuming BaseAgent's __init__ already takes 'initial_energy':
+        temp_agent_config["initial_energy"] = config.TEMP_AGENT_DEFAULT_INITIAL_ENERGY
+        # We might also need to remove any conflicting energy settings from the copied default_config
+        # if it had 'initial_state_override' for energy.
+        if "initial_state_override" in temp_agent_config:
+            temp_agent_config["initial_state_override"].pop("energy", None)
+            temp_agent_config["initial_state_override"].pop("energy_level", None)
+
+        log(f"[{self.name}] Attempting to add temporary SkillAgent '{temp_agent_config['name']}' for lineage '{lineage_id}' with MaxAge: {temp_agent_config['max_age']}, InitialEnergy: {temp_agent_config['initial_energy']}.", level="INFO")
+        new_agent_instance = self.add_agent_from_config(temp_agent_config)
+        if new_agent_instance:
+            log(f"[{self.name}] Successfully provisioned temporary SkillAgent: {new_agent_instance.name} for lineage '{lineage_id}'.", level="INFO")
+            # Note: TaskRouter is initialized once in main.py. For it to be aware of this new agent,
+            # TaskRouter would need a method to dynamically add skill agents and update its internal registry.
+            # The following lines are conditional on TaskRouter having such a method.
+            if self.task_router and hasattr(self.task_router, 'add_skill_agent'):
+                self.task_router.add_skill_agent(new_agent_instance) # 
+                log(f"[{self.name}] Updated TaskRouter with new temporary agent: {new_agent_instance.name}", level="DEBUG")
+            else:
+                log(f"[{self.name}] TaskRouter not updated with new temporary agent '{new_agent_instance.name}' (TaskRouter missing 'add_skill_agent' method or not set).", level="DEBUG")
+            return True
+        else:
+            log(f"[{self.name}] Failed to provision temporary SkillAgent for lineage '{lineage_id}'. add_agent_from_config returned None.", level="ERROR")
+            return False
 
     def add_agent_from_config(self, agent_config: Dict[str, Any]) -> Optional[Any]:
         """Adds a new agent to the system based on its configuration."""
@@ -258,29 +363,31 @@ class MetaAgent:
             try:
                 # Prepare agent_config for SkillAgent constructor
                 skill_agent_specific_config = agent_config.copy()
-                # Remove skill_tool if present, as it's passed explicitly
+
+                # These are passed as named arguments to SkillAgent, so remove from kwargs
                 skill_agent_specific_config.pop("skill_tool", None)
-                # Remove agent_type as SkillAgent constructor handles it internally via BaseAgent
-                skill_agent_specific_config.pop("agent_type", None)
-                # Remove 'name' as SkillAgent.__init__ does not expect it directly (per TypeError).
-                # SkillAgent or BaseAgent is assumed to handle name assignment internally,
-                # possibly using other config values like lineage_id and generation.
+                # context_manager, knowledge_base, communication_bus, identity_engine are not in agent_config
+                # agent_id is passed explicitly to SkillAgent constructor, so remove from skill_agent_specific_config
+                # to prevent "got multiple values for keyword argument 'agent_id'" in SkillAgent.__init__
+                skill_agent_specific_config.pop("agent_id", None)
+
+                # Pop 'name' as it will be passed as an explicit argument to SkillAgent constructor
+                name_for_constructor = agent_config.get("name") # Get name before popping
                 skill_agent_specific_config.pop("name", None)
-                # Remove 'age' as new agents start at age 0 (handled by BaseAgent)
+
+                skill_agent_specific_config.pop("agent_type", None)
                 skill_agent_specific_config.pop("age", None)
-                # Remove 'state' as new agents initialize their own state
                 skill_agent_specific_config.pop("state", None)
-                # Remove 'initial_energy' as SkillAgent sets its own initial energy for BaseAgent
-                skill_agent_specific_config.pop("initial_energy", None)
-                skill_agent_specific_config.pop("initial_energy_config", None) # Also remove this if present
-                # Remove 'max_age' as SkillAgent sets its own max_age for BaseAgent
-                skill_agent_specific_config.pop("max_age", None)
-                # Remove 'skill_tool_class_name' as it's not used by SkillAgent.__init__
+                
+                # These are specific to skill_loader or MetaAgent's default config structure,
+                # not directly used by SkillAgent.__init__ via **kwargs.
+                # SkillAgent.__init__ will derive/set its own values or get them from config_kwargs if they are standard.
                 skill_agent_specific_config.pop("skill_tool_class_name", None)
-                # Remove 'skill_module_name' as it's not used by SkillAgent.__init__
                 skill_agent_specific_config.pop("skill_module_name", None)
-                # Remove 'skill_tool_name' as it's not used by SkillAgent.__init__
-                skill_agent_specific_config.pop("skill_tool_name", None)
+                skill_agent_specific_config.pop("initial_energy_config", None) # Old key, ensure it's not passed
+
+                # The agent_id from agent_config will be used for the agent_id parameter in SkillAgent constructor
+                agent_id_for_constructor = agent_config.get("agent_id", agent_config.get("name"))
 
                 skill_agent = SkillAgent(
                     skill_tool=skill_tool_instance, 
@@ -288,7 +395,9 @@ class MetaAgent:
                     knowledge_base=self.knowledge,
                     communication_bus=self.communication_bus,
                     identity_engine=self.identity_engine, # Pass IdentityEngine
-                    **skill_agent_specific_config # Unpack the modified config
+                    name=name_for_constructor,           # Pass name explicitly
+                    agent_id=agent_id_for_constructor,   # Pass agent_id explicitly
+                    **skill_agent_specific_config        # Pass the rest (name, initial_energy, max_age, capabilities, lineage_id, etc.)
                 )
                 self.skill_agents.append(skill_agent)
                 self._update_combined_agents_list()

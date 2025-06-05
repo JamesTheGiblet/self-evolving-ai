@@ -988,63 +988,6 @@ class TaskAgent(BaseAgent):
             log(f"[{self.name}] _update_state_after_action: Called self.memory.log_tick for PAUSED Action: '{executed_capability}', Outcome: '{outcome}'. Memory size now: {len(self.memory.get_log())}", level="DEBUG")
             return
 
-        log_data_action = {
-            "tick": current_tick,
-            "action": executed_capability,
-            "outcome": outcome,
-            "reward": reward,
-            "details": copy.deepcopy(details)
-        }
-        log(f"[{self.name}] _update_state_after_action: Memory size before log_tick for '{executed_capability}': {len(self.memory.get_log())}", level="DEBUG")
-        self.memory.log_tick(log_data_action)
-        log(f"[{self.name}] _update_state_after_action: Called self.memory.log_tick with Action: '{executed_capability}', Outcome: '{outcome}', Reward: {reward}. Memory size now: {len(self.memory.get_log())}", level="DEBUG")
-
-        if outcome in ["pending_llm_interpretation", "pending_llm_conversation"]: 
-            request_id = details.get("request_id")
-            if request_id:
-                llm_timeout_duration_seconds = 30.0 
-                tick_interval = self.context_manager.tick_interval if self.context_manager else 0.5
-                llm_timeout_in_ticks = 10
-                if tick_interval > 0.001: 
-                    llm_timeout_in_ticks = max(1, int(llm_timeout_duration_seconds / tick_interval) + 5)
-                
-                self.state['pending_llm_operations'][request_id] = {
-                    "original_rl_state": initial_rl_state,
-                    "tick_sent": current_tick,
-                    "capability_initiated": executed_capability,
-                    "original_cap_inputs": details.get("original_user_query") or details.get("user_input_text"),
-                    "success_reward": 0.7, 
-                    "failure_reward": -0.3,
-                    "timeout_reward": -0.1,
-                    "timeout_at_tick": current_tick + llm_timeout_in_ticks,
-                    "llm_model_used": details.get("llm_model_used")
-                }
-                log(f"[{self.name}] Queued pending LLM operation '{request_id}' for capability '{executed_capability}'. Timeout in {llm_timeout_in_ticks} ticks.", level="INFO")
-        
-        log(f"[{self.name}] _update_state_after_action: Processing action '{executed_capability}', outcome: {outcome}, reward: {reward:.2f}", level="DEBUG")
-
-        next_rl_state = self._get_rl_state_representation()
-        self._update_q_value(
-            state_tuple=initial_rl_state,
-            action=executed_capability,
-            reward=reward,
-            next_state_tuple=next_rl_state
-        )
-
-        is_success = "success" in outcome.lower() or outcome in ["request_sent", "sync_request_sent_pending_response", "pending_llm_interpretation", "pending_llm_conversation"]
-        self.capability_performance_tracker.record_capability_execution(executed_capability, is_success, reward)
-
-        if executed_capability == "invoke_skill_agent_v1" and not is_success and outcome != "request_sent":
-            self.state["last_failed_skill_details"] = {
-                "tick": current_tick,
-                "target_skill_agent_id": details.get("target_skill_agent_id", "unknown"),
-                "action_requested": details.get("action_requested", executed_capability),
-                "reason": f"failure_immediate_{outcome}"
-            }
-        elif executed_capability == "triangulated_insight_v1" and result.get("diagnosis"):
-            self.last_diagnosis = result["diagnosis"]
-            log(f"[{self.name}] Updated last_diagnosis from '{executed_capability}' result: {self.last_diagnosis.get('diagnosis_id')}")
-
     def _execute_conversational_goal(self, goal_description: str, context: 'ContextManager', knowledge: 'KnowledgeBase', all_agent_names_in_system: List[str]):
         """Helper method to execute the conversational exchange capability directly."""
         current_tick = self.context_manager.get_tick()

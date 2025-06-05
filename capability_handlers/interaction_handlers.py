@@ -127,8 +127,23 @@ def execute_invoke_skill_agent_v1(agent: 'BaseAgent', params_used: dict, cap_inp
         log(f"[{agent.name}] InvokeSkill: Selected suitable agent '{chosen_target_skill_agent_id}' for specific command '{specific_command_for_lookup}'. Suitable: {suitable_agents_for_action}")
 
     if not chosen_target_skill_agent_id:
-        log(f"[{agent.name}] InvokeSkill: No suitable target agent found for specific command '{specific_command_for_lookup}' (derived from category '{final_skill_action_to_request}'). Suitable: {suitable_agents_for_action}, All Skill Agents: {list(available_skill_agents_info.keys())}", level="WARNING")
-        return {"outcome": "failure_no_suitable_target_agent", "reward": -0.3, "details": {"error": f"No suitable agent for specific command '{specific_command_for_lookup}' (category: '{final_skill_action_to_request}')."}}
+        # If a preferred target lineage was specified but no live agent from that lineage was found or could perform the action
+        if preferred_target_id:
+            log(f"[{agent.name}] InvokeSkill: Preferred target lineage '{preferred_target_id}' not found or no suitable agent in lineage for command '{specific_command_for_lookup}'. Signaling for potential provisioning.", level="INFO")
+            # This new outcome signals the TaskAgent to request provisioning
+            return {
+                "outcome": "failure_preferred_lineage_not_found",
+                "reward": -0.1, # Adjustable penalty
+                "details": {
+                    "error": f"Preferred skill lineage '{preferred_target_id}' not found or no suitable agent in lineage for command '{specific_command_for_lookup}'.",
+                    "requested_lineage_id": preferred_target_id,
+                    "original_skill_action_requested": final_skill_action_to_request, # The category
+                    "original_request_data": cap_inputs.get("request_data", {}).copy() # The original data payload for the skill
+                }
+            }
+        else: # No preferred target, and no suitable agent found generally
+            log(f"[{agent.name}] InvokeSkill: No suitable target agent found for specific command '{specific_command_for_lookup}' (derived from category '{final_skill_action_to_request}'). Suitable: {suitable_agents_for_action}, All Skill Agents: {list(available_skill_agents_info.keys())}", level="WARNING")
+            return {"outcome": "failure_no_suitable_target_agent", "reward": -0.3, "details": {"error": f"No suitable agent for specific command '{specific_command_for_lookup}' (category: '{final_skill_action_to_request}')."}}
 
     final_request_data = cap_inputs.get("request_data", {}).copy() 
     if final_skill_action_to_request == "maths_operation" and "maths_command" not in final_request_data:

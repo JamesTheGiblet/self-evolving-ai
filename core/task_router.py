@@ -149,6 +149,32 @@ class TaskRouter:
         log(f"[TaskRouter] Could not parse LLM decision or LLM failed to route '{user_request}'.", level="WARN")
         return None, None, None, "Failed to parse LLM routing decision."
 
+    def add_skill_agent(self, skill_agent_instance: Any):
+        """
+        Registers a single new skill agent's capabilities after initial setup.
+        """
+        if not (hasattr(skill_agent_instance, 'skill_tool') and skill_agent_instance.skill_tool):
+            log(f"[TaskRouter] New agent {getattr(skill_agent_instance, 'name', 'UnknownAgent')} has no skill_tool.", level="WARN")
+            return
+
+        skill_tool = skill_agent_instance.skill_tool
+        if not hasattr(skill_tool, 'get_capabilities'):
+            log(f"[TaskRouter] Skill tool for agent {getattr(skill_agent_instance, 'name', 'UnknownAgent')} has no get_capabilities method.", level="WARN")
+            return
+            
+        try:
+            capabilities = skill_tool.get_capabilities()
+            skill_name_from_cap = capabilities.get("skill_name", getattr(skill_tool, 'skill_name', None))
+
+            if skill_name_from_cap and skill_name_from_cap not in self.skill_capabilities:
+                self.skill_capabilities[skill_name_from_cap] = capabilities
+                log(f"[TaskRouter] Dynamically registered new skill: '{skill_name_from_cap}' from agent {getattr(skill_agent_instance, 'name', 'UnknownAgent')}.", level="INFO")
+            elif skill_name_from_cap in self.skill_capabilities:
+                log(f"[TaskRouter] Skill '{skill_name_from_cap}' from agent {getattr(skill_agent_instance, 'name', 'UnknownAgent')} already registered. Skipping dynamic add.", level="DEBUG")
+            else:
+                log(f"[TaskRouter] New skill agent {getattr(skill_agent_instance, 'name', 'UnknownAgent')}'s tool did not provide a usable skill_name in its capabilities structure.", level="WARN")
+        except Exception as e:
+            log(f"[TaskRouter] Error dynamically registering skill from agent {getattr(skill_agent_instance, 'name', 'UnknownAgent')}: {e}", level="ERROR", exc_info=True)
 # Example of how MetaAgent might use it:
 # class MetaAgent:
 #     def __init__(self, context, knowledge, communication_bus, skill_agents_list):

@@ -21,40 +21,56 @@ class SkillAgent(BaseAgent):
                  skill_tool: 'BaseSkillTool', 
                  context_manager: 'ContextManager',
                  knowledge_base: 'KnowledgeBase',
-                 communication_bus: 'CommunicationBus', # Added comma
-                 agent_name: Optional[str] = None, # Keep for flexibility, though BaseAgent.name is primary
-                 capabilities: Optional[List[str]] = None, 
-                 capability_params: Optional[Dict[str, Any]] = None,
-                 lineage_id: Optional[str] = None,
-                 generation: int = 0,
-                 behavior_mode: Optional[str] = None, # Added
+                 communication_bus: 'CommunicationBus',
+                 name: Optional[str] = None, # Added explicit name parameter
                  agent_id: Optional[str] = None,
-                 identity_engine: Optional['IdentityEngine'] = None): # Added identity_engine
+                 identity_engine: Optional['IdentityEngine'] = None,
+                 **config_kwargs): # Catch all other config values
 
-        name_for_base = agent_id or agent_name or \
+        # Determine name for BaseAgent: prioritize explicit name, then agent_id, then from skill_tool
+        # config_kwargs.get('name') is no longer needed here as name is passed explicitly from MetaAgent
+        name_for_base = name or \
+                        agent_id or \
                         (skill_tool.skill_name if hasattr(skill_tool, 'skill_name') else "UnnamedSkillAgent")
         
-        # Ensure capabilities list is correctly formed for BaseAgent
-        provided_capabilities = capabilities
+        # 'name' should have been passed explicitly and popped from config_kwargs by MetaAgent.
+        # Popping here again is a safeguard / no-op if MetaAgent handled it.
+        config_kwargs.pop('name', None)
+
+        # Remove 'skill_tool_name' from config_kwargs as it's not a BaseAgent parameter
+        config_kwargs.pop('skill_tool_name', None)
+        
+        # Determine capabilities for BaseAgent: prioritize from config_kwargs, then derive, then default
+        provided_capabilities = config_kwargs.pop('capabilities', None)
         if not provided_capabilities and hasattr(skill_tool, 'skill_name'):
-            # If no capabilities are explicitly passed, use the skill_tool's name as its capability.
-            # This aligns with how TaskRouter might identify it.
-            # We might want a more structured capability name like "skill_tool_name_v1"
-            # Local import to avoid circular dependency at module level if skill_loader imports SkillAgent
             from core.skill_loader import generate_lineage_id_from_skill_name # Local import
             temp_lineage = generate_lineage_id_from_skill_name(skill_tool.skill_name)
             provided_capabilities = [temp_lineage.replace("skill_", "", 1) + "_v1"] # Example: "calendar_ops_v1"
-
         elif not provided_capabilities:
             provided_capabilities = ["unknown_skill_capability_v1"]
 
-        # Determine lineage_id more robustly
-        derived_lineage_id = lineage_id
+        # Determine lineage_id for BaseAgent: prioritize from config_kwargs, then derive, then default
+        derived_lineage_id = config_kwargs.pop('lineage_id', None)
         if not derived_lineage_id and hasattr(skill_tool, 'skill_name'):
             from core.skill_loader import generate_lineage_id_from_skill_name # Local import
             derived_lineage_id = generate_lineage_id_from_skill_name(skill_tool.skill_name)
-        elif not derived_lineage_id: # Fallback if skill_tool has no name or lineage_id not provided
+        elif not derived_lineage_id:
             derived_lineage_id = name_for_base.split('-gen')[0]
+
+        # Resolve initial_energy: prioritize from config_kwargs, then default for SkillAgent
+        resolved_initial_energy = config_kwargs.pop('initial_energy', config.DEFAULT_INITIAL_ENERGY * 0.5)
+        
+        # Resolve max_age: prioritize from config_kwargs, then default system max_age
+        resolved_max_age = config_kwargs.pop('max_age', config.DEFAULT_MAX_AGENT_AGE)
+
+        # Resolve generation: prioritize from config_kwargs, then default
+        resolved_generation = config_kwargs.pop('generation', 0)
+
+        # Resolve behavior_mode: prioritize from config_kwargs, then default for SkillAgent
+        resolved_behavior_mode = config_kwargs.pop('behavior_mode', "reactive")
+        
+        # Resolve capability_params: prioritize from config_kwargs, then default (None means BaseAgent uses its own default)
+        resolved_capability_params = config_kwargs.pop('capability_params', None)
 
         super().__init__(
             name=name_for_base, # This will be the unique ID like "skill_calendar_ops-gen0"
@@ -64,21 +80,21 @@ class SkillAgent(BaseAgent):
             communication_bus=communication_bus,
             agent_type=SkillAgent.AGENT_TYPE,
             capabilities=provided_capabilities, 
-            capability_params=capability_params,
-            initial_energy=config.DEFAULT_INITIAL_ENERGY * 0.5, 
-            max_age=config.DEFAULT_MAX_AGENT_AGE, 
+            capability_params=resolved_capability_params,
+            initial_energy=resolved_initial_energy, 
+            max_age=resolved_max_age, 
             lineage_id=derived_lineage_id,
-            generation=generation,
-            behavior_mode=behavior_mode or "reactive", # Skill agents are typically reactive
-            identity_engine=identity_engine # Pass to BaseAgent
+            generation=resolved_generation,
+            behavior_mode=resolved_behavior_mode,
+            identity_engine=identity_engine,
+            **config_kwargs # Pass any remaining unhandled kwargs from the config
         )
         self.skill_tool = skill_tool
         
         # Ensure self.memory is initialized for SkillAgent as well
         if not hasattr(self, 'memory') or self.memory is None:
              self.memory = AgentMemory(agent_id=self.id)
-
-        log(f"SkillAgent '{self.name}' (ID: {self.id}) initialized. Skill: '{self.skill_tool.skill_name if hasattr(self.skill_tool, 'skill_name') else 'UnknownSkill'}', Lineage: {self.lineage_id}, Gen: {self.generation}.", level="INFO")
+        log(f"SkillAgent '{self.name}' (ID: {self.id}) initialized. Skill: '{self.skill_tool.skill_name if hasattr(self.skill_tool, 'skill_name') else 'UnknownSkill'}', Lineage: {self.lineage_id}, Gen: {self.generation}, InitialEnergy: {self.energy:.2f}, MaxAge: {self.max_age}.", level="INFO")
 
     def execute_skill_action(self, skill_command_str: str, params: Dict[str, Any], invoking_agent_id: str, task_id: Optional[str] = None) -> Dict[str, Any]:
         """
