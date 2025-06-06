@@ -149,13 +149,11 @@ self-evolving-ai/
 │   ├── capability_definitions.py # Defines all system capabilities and their parameters
 │   ├── capability_executor.py   # Dispatches capability execution to handlers
 │   ├── capability_registry.py   # Manages and provides access to capability definitions
-│   ├── capability_handlers.py   # Core execution logic for various capabilities
 │   ├── capability_input_preparer.py # Dynamically prepares inputs for capabilities
 │   ├── context_manager.py       # Manages simulation tick, environment state, and time
 │   ├── llm_planner.py           # Utilizes LLMs for plan generation and goal interpretation
 │   ├── meta_agent.py            # Orchestrates agents, manages population, and evolution
 │   ├── mutation_engine.py       # Handles evolutionary mutation of agent configurations
-│   ├── performance_tracker.py   # Tracks performance and usage of agent capabilities
 │   ├── roles.py                 # Defines agent roles and their behavioral biases
 │   ├── skill_agent.py           # Base class for skill-specialized agents
 │   ├── skill_definitions.py     # Maps high-level capabilities to specific skill actions
@@ -169,19 +167,10 @@ self-evolving-ai/
 │   └── test_system_api.py       # Tests for the system API
 ├── utils/                    # General utility modules for the system
 │   ├── logger.py                # System-wide logging utility
-│   ├── openai_api.py            # Wrapper for OpenAI API interactions
 │   ├── test_logger.py           # Tests for the logger
-│   └── test_openai_api.py       # Tests for the OpenAI API wrapper
-├── capabilities/             # Definitions of specific capabilities agents can use
-│   ├── __init__.py              # Package initializer
-│   ├── data_analysis.py         # Data analysis capability definitions
-│   └── test_data_analysis.py    # Tests for data analysis capabilities
 ├── capability_handlers/      # Modular handlers for specific capabilities, imported by core handlers
 │   ├── communication_handlers.py # Handles inter-agent communication capabilities
 │   ├── data_analysis_handlers.py # Handles basic and advanced data analysis capabilities
-│   ├── knowledge_handlers.py    # Handles knowledge storage and retrieval capabilities
-│   ├── planning_handlers.py     # Handles LLM-based planning and goal interpretation capabilities
-│   └── sequence_handlers.py     # Handles sequential execution of capabilities
 │   ├── knowledge_handlers.py    # Handles knowledge storage and retrieval capabilities
 │   ├── planning_handlers.py     # Handles LLM-based planning and goal interpretation capabilities
 │   └── sequence_handlers.py     # Handles sequential execution of capabilities
@@ -189,6 +178,7 @@ self-evolving-ai/
 │   ├── test_knowledge_handlers.py    # Tests for knowledge handlers
 │   ├── test_planning_handlers.py     # Tests for planning handlers
 │   └── test_sequence_handlers.py     # Tests for sequence handlers
+├── performance_tracker.py   # Tracks performance and usage of agent capabilities (assuming moved or standalone)
 ├── memory/                   # Evolving knowledge and memory handling components
 │   ├── agent_memory.py          # Stores logs and metrics for individual agents
 │   ├── fact_memory.py           # Manages discrete facts (e.g., user-injected knowledge)
@@ -216,13 +206,11 @@ self-evolving-ai/
 │   ├── test_capability_definitions.py     # Tests for capability definitions logic
 │   ├── test_capability_executor.py        # Tests for capability_executor.py
 │   ├── test_capability_input_preparer.py  # Tests for capability_input_preparer.py
-│   ├── test_capability_handlers.py        # Tests for core capability_handlers.py
 │   ├── test_context_manager.py            # Tests for context_manager.py
 │   ├── test_llm_planner.py                # Tests for llm_planner.py
 │   ├── test_performance_tracker.py        # Tests for performance_tracker.py
 │   ├── test_skill_agent.py                # Tests for skill_agent.py
 │   ├── test_skill_definitions.py          # Tests for skill_definitions.py
-│   ├── test_skill_handlers.py             # Tests for core skill_handlers.py
 │   └── test_task_agent.py                 # Tests for task_agent.py
 ├── agent_data/               # Persistent data storage for agents
 │   └── notes.txt                # Example agent data file
@@ -234,10 +222,6 @@ self-evolving-ai/
 ├── gui.py                    # Graphical User Interface for monitoring and interaction
 ├── config.py                 # Global configuration settings and environment variables
 ├── README.md                 # This file
-└── requirements.txt          # Python dependencies
-├── main.py                   # System bootstrap and main simulation loop execution
-├── gui.py                    # Graphical User Interface for monitoring and interaction
-├── config.py                 # Global configuration settings and environment variables
 └── requirements.txt          # Python dependencies
 
 🌐 Use Cases
@@ -307,4 +291,3 @@ For the detailed, phased roadmap, including current status and stretch goals, pl
 📬 Contact
 
 For ideas, collaboration, or philosophical debate: 📧 your.email@domain.com 🔗 LinkedIn 🐙 GitHub
-

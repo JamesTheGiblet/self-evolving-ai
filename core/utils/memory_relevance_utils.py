@@ -2,7 +2,7 @@
 
 import time
 import math
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from utils.logger import log
 
 # Assuming config.py contains these, or they are passed in via a config dict
@@ -10,26 +10,29 @@ from utils.logger import log
 
 def update_access_metadata(item_metadata: Dict[str, Any], current_tick: int) -> Dict[str, Any]:
     """
-    Updates the access-related metadata for a memory item.
+    Updates the access-related metadata (tick and count) for a memory item.
+    Timestamp is updated separately if needed.
 
     Args:
         item_metadata: A dictionary containing at least 'last_accessed_tick' and 'access_count'.
         current_tick: The current simulation tick.
+        current_timestamp: The current Unix timestamp.
 
     Returns:
         The updated item_metadata dictionary.
     """
-    item_metadata["last_accessed_tick"] = current_tick
+    if current_tick is not None:
+        item_metadata["last_accessed_tick"] = current_tick
+    item_metadata["last_accessed_timestamp"] = current_timestamp # Always update timestamp
     item_metadata["access_count"] = item_metadata.get("access_count", 0) + 1
     return item_metadata
 
 def calculate_relevance_score(
     item_metadata: Dict[str, Any],
-    current_tick: int,
     relevance_config: Dict[str, Any]
 ) -> float:
     """
-    Calculates the relevance score for a memory item.
+    Calculates the relevance score for a memory item based on various factors.
 
     Args:
         item_metadata: A dictionary containing metadata like:

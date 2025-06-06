@@ -105,8 +105,9 @@ class KnowledgeBase:
         Updates an item's access metadata and recalculates its relevance score.
         """
         item_meta = self._get_item_metadata_dict(lineage_id, item_id)
-        item_meta = update_access_metadata(item_meta, current_tick)
-        new_relevance = calculate_relevance_score(item_meta, current_tick, self.relevance_params)
+        current_timestamp = time.time() # Get current time for timestamp-based updates
+        item_meta = update_access_metadata(item_meta, current_tick, current_timestamp)
+        new_relevance = calculate_relevance_score(item_meta, self.relevance_params)
         item_meta["relevance_score"] = new_relevance
         self._save_item_metadata(lineage_id, item_id, item_meta)
         log(f"Updated relevance for item {item_id}: {new_relevance:.3f}", level="DEBUG")

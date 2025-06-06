@@ -12,18 +12,24 @@ from core.utils.data_extraction import _extract_data_recursively
 # Import constants
 from core.constants import DEFAULT_STOP_WORDS
 
-def execute_data_analysis_basic_v1(agent, params_used: dict, cap_inputs: dict, knowledge, context: ContextManager, all_agent_names_in_system: list):
+def _prepare_data_for_analysis(cap_inputs: dict) -> tuple[Any, List[float], List[str], Dict[str, Any]]:
+    """Helper function to extract data and prepare initial details."""
     data_points = cap_inputs.get("data_to_analyze", []) # Expects a list
 
     extracted_numbers: List[float] = []
     extracted_texts: List[str] = []
     _extract_data_recursively(data_points, extracted_numbers, extracted_texts)
 
-    details: Dict[str, Any] = {
+    initial_details: Dict[str, Any] = {
         "input_item_count": len(data_points) if isinstance(data_points, list) else 1,
         "extracted_numbers_count": len(extracted_numbers),
         "extracted_texts_count": len(extracted_texts),
     }
+    return data_points, extracted_numbers, extracted_texts, initial_details
+
+def execute_data_analysis_basic_v1(agent, params_used: dict, cap_inputs: dict, knowledge, context: ContextManager, all_agent_names_in_system: list):
+    data_points, extracted_numbers, extracted_texts, details = _prepare_data_for_analysis(cap_inputs)
+
     outcome = "success_no_data_analyzed"
     immediate_reward = 0.1 # Base reward for attempting
     log_message_parts = []
@@ -112,19 +118,12 @@ def execute_data_analysis_v1(agent, params_used: dict, cap_inputs: dict, knowled
             params_used["keywords"] (list of strings for keyword_search)
             params_used["regex_pattern"] (string for regex_match)
     """
-    data_points = cap_inputs.get("data_to_analyze", [])
+    data_points, extracted_numbers, extracted_texts, details = _prepare_data_for_analysis(cap_inputs)
     analysis_type_param = params_used.get("analysis_type", "advanced_stats") # Default to advanced_stats
 
-    extracted_numbers: List[float] = []
-    extracted_texts: List[str] = []
-    _extract_data_recursively(data_points, extracted_numbers, extracted_texts)
+    # Add analysis_type_param to details after initial preparation
+    details["requested_analysis_type"] = analysis_type_param
 
-    details: Dict[str, Any] = {
-        "input_item_count": len(data_points) if isinstance(data_points, list) else 1,
-        "extracted_numbers_count": len(extracted_numbers),
-        "extracted_texts_count": len(extracted_texts),
-        "requested_analysis_type": analysis_type_param
-    }
     outcome = "success_analysis_performed" # Default optimistic outcome
     immediate_reward = 0.2 # Base reward for attempting advanced analysis
     log_parts = []

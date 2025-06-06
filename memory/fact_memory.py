@@ -99,8 +99,9 @@ class FactMemory:
     def _update_fact_relevance_and_access(self, fact: Fact, current_tick: Optional[int]):
         """Updates a fact's access metadata and recalculates its relevance score using utilities."""
         fact_meta = self._get_fact_metadata_dict(fact)
-        fact_meta = update_access_metadata(fact_meta, current_tick if current_tick is not None else int(time.time())) # Ensure tick is int
-        new_relevance = calculate_relevance_score(fact_meta, current_tick if current_tick is not None else int(time.time()), self.relevance_params)
+        current_timestamp = time.time()
+        fact_meta = update_access_metadata(fact_meta, current_tick, current_timestamp)
+        new_relevance = calculate_relevance_score(fact_meta, self.relevance_params)
         fact_meta["relevance_score"] = new_relevance
         self._save_fact_metadata(fact, fact_meta)
 
