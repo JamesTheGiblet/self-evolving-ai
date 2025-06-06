@@ -1,70 +1,43 @@
-# c:/Users/gilbe/Desktop/self-evolving-ai/capability_handlers/llm_handlers.py
-"""
-Capability Handlers for LLM-based interactions.
-"""
-from typing import Dict, List, Any, TYPE_CHECKING, Optional
-
+# capability_handlers/llm_handlers.py
+from typing import Dict, Any, List, TYPE_CHECKING
 from utils.logger import log
-from utils import local_llm_connector
-import config
+from utils import local_llm_connector # Assuming direct use for now
+import config # For default model
 
 if TYPE_CHECKING:
     from core.agent_base import BaseAgent
     from memory.knowledge_base import KnowledgeBase
     from core.context_manager import ContextManager
 
-
-def execute_conversational_exchange_llm_v1(agent: 'BaseAgent', 
-                                       params_used: dict,    
-                                       cap_inputs: dict,     
-                                       knowledge: 'KnowledgeBase', 
-                                       context: 'ContextManager',  
-                                       all_agent_names_in_system: list 
-                                       ) -> Dict[str, Any]:
+# --- Handler function definitions ---
+def execute_conversational_exchange_llm_v1(agent: 'BaseAgent', params_used: Dict, cap_inputs: Dict, knowledge: 'KnowledgeBase', context: 'ContextManager', all_agent_names_in_system: List[str]) -> Dict[str, Any]:
     """
-    Handles a conversational turn using the configured local LLM.
+    Handles a conversational exchange with an LLM.
+    This is a synchronous call for simplicity in this example.
+    An async version would return a request_id and outcome "pending_llm_response".
     """
-    messages: List[Dict[str, str]] = []
-    conversation_history = cap_inputs.get("conversation_history", [])
-    user_input = cap_inputs.get("user_input_text")
-    system_prompt = cap_inputs.get("system_prompt", "You are a helpful AI assistant.")
-    llm_model_to_use = params_used.get("llm_model", config.DEFAULT_LLM_MODEL)
+    prompt_messages = cap_inputs.get("prompt_messages")
+    model_name = params_used.get("llm_model", config.DEFAULT_LLM_MODEL)
 
-    if system_prompt: 
-        messages.append({"role": "system", "content": system_prompt})
-    for entry in conversation_history:
-        if isinstance(entry, dict) and "role" in entry and "content" in entry:
-            messages.append(entry)
-        else:
-            log(f"Agent {getattr(agent, 'name', 'Unknown')}: Invalid entry in conversation history: {entry}", level="WARN")
+    if not prompt_messages:
+        log(f"[{agent.name}] Failed conversational_exchange_llm_v1: Missing prompt_messages.", level="WARN")
+        return {"outcome": "failure_missing_prompt", "reward": -0.2, "details": {"error": "prompt_messages are required."}}
 
-    messages.append({"role": "user", "content": user_input})
+    log(f"[{agent.name}] Executing conversational_exchange_llm_v1. Model: {model_name}. Prompt: {str(prompt_messages)[:100]}", level="INFO")
+    
+    llm_response = local_llm_connector.call_local_llm_api(prompt_messages=prompt_messages, model_name=model_name)
 
-    try:
-        agent_name = getattr(agent, 'name', 'UnknownAgent')
-        log(f"Agent {agent_name}: Dispatching conversational exchange to local LLM. Model: {llm_model_to_use}", level="INFO")
+    if llm_response:
+        return {"outcome": "success_llm_response_received", "reward": 0.5, "details": {"llm_response": llm_response}}
+    else:
+        return {"outcome": "failure_llm_call_failed", "reward": -0.3, "details": {"error": "LLM call did not return a response."}}
 
-        request_id = local_llm_connector.call_local_llm_api_async(
-            prompt_messages=messages,
-            model_name=llm_model_to_use,
-            temperature=params_used.get("temperature", 0.7),
-        )
-
-        if not request_id:
-            log(f"Agent {agent_name}: Failed to dispatch LLM conversational exchange.", level="ERROR")
-            return {"outcome": "failure_llm_dispatch", "reward": -0.5, "details": "Failed to dispatch LLM conversation."}
-
-        return {
-            "outcome": "pending_llm_conversation", 
-            "reward": 0.05, 
-            "details": {
-                "request_id": request_id, 
-                "llm_model_used": llm_model_to_use, 
-                "user_input_text": user_input, 
-                "capability_initiated": "conversational_exchange_llm_v1"
-            }
-        }
-    except Exception as e:
-        agent_name = getattr(agent, 'name', 'UnknownAgent')
-        log(f"Agent {agent_name}: Error during local LLM conversational exchange: {e}", level="ERROR", exc_info=True)
-        return {"outcome": "failure_llm_exception", "reward": -0.5, "details": f"LLM call exception: {e}"}
+# --- Self-registration ---
+try:
+    from core.capability_executor import register_capability
+    register_capability("conversational_exchange_llm_v1", execute_conversational_exchange_llm_v1)
+    log("[LLMHandlers] Successfully registered LLM handlers.", level="DEBUG")
+except ImportError:
+    log("[LLMHandlers] Critical: Could not import 'register_capability'. Handlers will not be available.", level="CRITICAL")
+except Exception as e:
+    log(f"[LLMHandlers] Critical: Exception during self-registration: {e}", level="CRITICAL", exc_info=True)

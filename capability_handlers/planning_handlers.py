@@ -1,46 +1,44 @@
 # capability_handlers/planning_handlers.py
-
-from typing import Dict, Any, List
-from capability_handlers.sequence_handlers import execute_sequence_executor_v1
+from typing import Dict, Any, List, TYPE_CHECKING
 from utils.logger import log
-from core.context_manager import ContextManager
-from core.llm_planner import LLMPlanner
- 
-def execute_interpret_goal_with_llm_v1(agent, params_used: dict, cap_inputs: dict, knowledge, context: ContextManager, all_agent_names_in_system: list):
+from utils import local_llm_connector # Assuming direct use for now
+import config # For default model
+
+if TYPE_CHECKING:
+    from core.agent_base import BaseAgent
+    from memory.knowledge_base import KnowledgeBase
+    from core.context_manager import ContextManager
+
+# --- Handler function definitions ---
+def execute_interpret_goal_with_llm_v1(agent: 'BaseAgent', params_used: Dict, cap_inputs: Dict, knowledge: 'KnowledgeBase', context: 'ContextManager', all_agent_names_in_system: List[str]) -> Dict[str, Any]:
     """
-    Uses the LLMPlanner to generate a sequence of actions for a high-level user query
-    and then executes that sequence using sequence_executor_v1.
+    Handles interpreting a high-level goal into a plan using an LLM.
+    This is a synchronous call for simplicity. An async version would be preferable.
     """
-    user_query = cap_inputs.get("user_query", params_used.get("default_query", "Perform a standard task."))
-    llm_model_name = params_used.get("llm_model", "simulated_llm") # Could be configured
+    goal_description = cap_inputs.get("goal_description")
+    model_name = params_used.get("llm_model", config.DEFAULT_LLM_MODEL)
+    # Example prompt, would need to be more sophisticated
+    prompt_messages = [{"role": "system", "content": "You are a planning assistant. Convert the user's goal into a JSON list of actionable steps."},
+                       {"role": "user", "content": f"Goal: {goal_description}"}]
 
-    log(f"[{agent.name}] Cap 'interpret_goal_with_llm_v1' received query: '{user_query}'")
+    if not goal_description:
+        return {"outcome": "failure_missing_goal", "reward": -0.2, "details": {"error": "goal_description is required."}}
 
-    # LLMPlanner now uses local_llm_connector which doesn't take an api_key directly here.
-    # API keys for external services would be handled by the connector if needed, typically via env vars.
-    planner_instance = LLMPlanner(model_name=llm_model_name)
+    log(f"[{agent.name}] Executing interpret_goal_with_llm_v1. Model: {model_name}. Goal: {goal_description}", level="INFO")
+    llm_plan_str = local_llm_connector.call_local_llm_api(prompt_messages=prompt_messages, model_name=model_name)
 
-    # In a real scenario, you'd pass available capabilities and skills to the planner
-    # For now, the simulated planner has a hardcoded response for a specific goal.
-    # You would also need to describe the skill agent actions.
-    # For simplicity in this example, we'll pass the direct capabilities.
-    # The LLMPlanner's _construct_prompt has hardcoded skill examples for now.
-    # generate_plan now returns a request_id for an async operation
-    request_id = planner_instance.generate_plan(user_query, agent.capabilities)
-
-    if request_id:
-        log(f"[{agent.name}] LLM plan generation dispatched. Request ID: {request_id}")
-        # Return a pending outcome, TaskAgent will handle the async response
-        return {
-            "outcome": "pending_llm_interpretation", # New outcome type
-            "reward": 0.05, # Small reward for dispatching
-            "details": {
-                "request_id": request_id,
-                "llm_model_used": llm_model_name,
-                "original_user_query": user_query, # Store original query for context
-                "capability_initiated": "interpret_goal_with_llm_v1"
-            }
-        }
+    if llm_plan_str:
+        # Further parsing of llm_plan_str into a structured plan would happen here
+        return {"outcome": "success_plan_generated", "reward": 0.7, "details": {"raw_plan_from_llm": llm_plan_str}}
     else:
-        log(f"[{agent.name}] LLMPlanner failed to generate a plan for query: '{user_query}'", level="WARNING")
-        return {"outcome": "failure_llm_planning_failed", "reward": -0.5, "details": {"user_query": user_query, "error": "LLM planner returned no plan."}}
+        return {"outcome": "failure_llm_planning_failed", "reward": -0.4, "details": {"error": "LLM failed to generate a plan."}}
+
+# --- Self-registration ---
+try:
+    from core.capability_executor import register_capability
+    register_capability("interpret_goal_with_llm_v1", execute_interpret_goal_with_llm_v1)
+    log("[PlanningHandlers] Successfully registered planning handlers.", level="DEBUG")
+except ImportError:
+    log("[PlanningHandlers] Critical: Could not import 'register_capability'. Handlers will not be available.", level="CRITICAL")
+except Exception as e:
+    log(f"[PlanningHandlers] Critical: Exception during self-registration: {e}", level="CRITICAL", exc_info=True)

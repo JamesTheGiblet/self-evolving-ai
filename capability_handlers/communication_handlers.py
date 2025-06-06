@@ -1,46 +1,32 @@
-# c:/Users/gilbe/Desktop/self-evolving-ai/capability_handlers/communication_handlers.py
-
-from typing import Dict, List, Any, TYPE_CHECKING
+# capability_handlers/communication_handlers.py
+from typing import Dict, Any, List, TYPE_CHECKING
 from utils.logger import log
-from core.context_manager import ContextManager
 
 if TYPE_CHECKING:
     from core.agent_base import BaseAgent
-    from memory.knowledge_base import KnowledgeBase # Not directly used in body, but part of signature
-else:
-    BaseAgent = Any
-    KnowledgeBase = Any
+    from memory.knowledge_base import KnowledgeBase
+    from core.context_manager import ContextManager
 
-def execute_communication_broadcast_v1(agent: BaseAgent, params_used: dict, cap_inputs: dict, knowledge: KnowledgeBase, context: ContextManager, all_agent_names_in_system: list):
-    """Executes the communication_broadcast_v1 capability."""
-    outcome = "pending"
-    details = {}
-    immediate_reward = 0.0
+# --- Handler function definitions ---
+def execute_communication_broadcast_v1(agent: 'BaseAgent', params_used: Dict, cap_inputs: Dict, knowledge: 'KnowledgeBase', context: 'ContextManager', all_agent_names_in_system: List[str]) -> Dict[str, Any]:
+    """
+    Handles broadcasting a message to other agents or the system.
+    Placeholder implementation.
+    """
+    message_content = cap_inputs.get("message_content", "Default broadcast message.")
+    target_agents = cap_inputs.get("target_agents") # Can be None (all), "system", or a list of agent names
 
-    message_content_dict = cap_inputs.get("message_content", {"info": "default broadcast"})
+    log(f"[{agent.name}] Executing communication_broadcast_v1. Message: '{message_content}'. Target: {target_agents}", level="INFO")
+    # Actual broadcast logic would go here, possibly interacting with CommunicationBus
+    # For now, just a log and a successful outcome.
+    return {"outcome": "success_message_broadcasted", "reward": 0.3, "details": {"message_sent": message_content, "recipients_targeted": target_agents or "all_active"}}
 
-    # Wrap the original message content with a type indicator and sender info
-    # This allows BaseAgent._handle_message to recognize it as a broadcast
-    broadcast_message_content = {
-        "type": "broadcast", # <-- Add this key to identify it as a broadcast
-        "original_content": message_content_dict, # <-- Nest the original content
-        "sender_id": agent.id, # Add sender info for clarity
-        "sender_name": agent.name,
-        "tick": context.get_tick() # Add tick info
-    }
-    if agent.communication_bus and all_agent_names_in_system: 
-        agent.communication_bus.broadcast_message(agent.name, message_content_dict, all_agent_names_in_system)
-        agent.memory.log_message_sent()
-        outcome = "success"
-        details["message_length"] = len(str(message_content_dict)) 
-        immediate_reward = 0.35
-        log(f"[{agent.name}] Cap 'communication_broadcast_v1' broadcasted: '{message_content_dict}'")
-    elif not agent.communication_bus:
-        outcome = "failure_no_bus"
-        immediate_reward = -0.1
-        log(f"[{agent.name}] Cap 'communication_broadcast_v1' failed: No communication bus.")
-    else: 
-        outcome = "success_no_recipients"
-        immediate_reward = 0.05
-        log(f"[{agent.name}] Cap 'communication_broadcast_v1' attempted broadcast, but no other agents in system.")
-    return {"outcome": outcome, "details": details, "reward": immediate_reward}
+# --- Self-registration ---
+try:
+    from core.capability_executor import register_capability
+    register_capability("communication_broadcast_v1", execute_communication_broadcast_v1)
+    log("[CommunicationHandlers] Successfully registered communication handlers.", level="DEBUG")
+except ImportError:
+    log("[CommunicationHandlers] Critical: Could not import 'register_capability'. Handlers will not be available.", level="CRITICAL")
+except Exception as e:
+    log(f"[CommunicationHandlers] Critical: Exception during self-registration: {e}", level="CRITICAL", exc_info=True)
