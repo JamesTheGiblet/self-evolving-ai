@@ -1,10 +1,16 @@
 # capability_handlers/knowledge_handlers.py
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, TYPE_CHECKING
 from utils.logger import log
 from core.context_manager import ContextManager
 
+if TYPE_CHECKING:
+    from core.agent_base import BaseAgent
+    from memory.knowledge_base import KnowledgeBase
+    # ContextManager is already imported directly
+
 try:
+    # This import seems unused in the current functions. Consider removing if not needed.
     from memory.fact_memory import FactMemory
 except ImportError:
     FactMemory = None # Placeholder if not available
@@ -72,3 +78,16 @@ def execute_knowledge_retrieval_v1(agent, params_used: dict, cap_inputs: dict, k
         immediate_reward = -0.1
     log(f"[{agent.name}] Cap 'knowledge_retrieval_v1' retrieval for lineage '{agent.state.get('lineage_id')}' with params {query_params_input}. Outcome: {outcome}, items: {details.get('items_retrieved', 0)}")
     return {"outcome": outcome, "details": details, "reward": immediate_reward}
+
+# --- Self-registration ---
+# This block runs when the module is imported by the dynamic loader in capability_executor.py
+try:
+    from core.capability_executor import register_capability
+    # Register each handler function this module provides
+    register_capability("knowledge_storage_v1", execute_knowledge_storage_v1)
+    register_capability("knowledge_retrieval_v1", execute_knowledge_retrieval_v1)
+    log("[KnowledgeHandlers] Successfully registered knowledge handlers.", level="DEBUG")
+except ImportError:
+    log("[KnowledgeHandlers] Critical: Could not import 'register_capability' from 'core.capability_executor'. Knowledge handlers will not be available.", level="CRITICAL")
+except Exception as e:
+    log(f"[KnowledgeHandlers] Critical: Exception during self-registration: {e}", level="CRITICAL", exc_info=True)

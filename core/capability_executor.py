@@ -7,48 +7,28 @@ This module is responsible for dispatching capability execution requests
 to the appropriate handler functions defined in core.capability_handlers.
 """
 from typing import TYPE_CHECKING
+import os
+import importlib.util
+import sys
 from utils.logger import log
 from core.context_manager import ContextManager
-from capability_handlers.knowledge_handlers import (
-    execute_knowledge_storage_v1,
-    execute_knowledge_retrieval_v1,
-)
-from capability_handlers.interaction_handlers import execute_invoke_skill_agent_v1
-from capability_handlers.insight_handlers import execute_triangulated_insight_v1
-from capability_handlers.llm_handlers import execute_conversational_exchange_llm_v1
-from capability_handlers.communication_handlers import execute_communication_broadcast_v1
-from capability_handlers.data_analysis_handlers import (
-    execute_data_analysis_basic_v1,
-    execute_data_analysis_v1,
-)
-from capability_handlers.export_handlers import execute_export_agent_evolution_v1
-from capability_handlers.sequence_handlers import execute_sequence_executor_v1
-from capability_handlers.planning_handlers import execute_interpret_goal_with_llm_v1
 
 if TYPE_CHECKING:
     from core.agent_base import BaseAgent
     from memory.knowledge_base import KnowledgeBase
 
-try:
-    from memory.fact_memory import FactMemory
-except ImportError:
-    FactMemory = None
+# CAPABILITY_EXECUTION_MAP will be populated dynamically by handler modules
+CAPABILITY_EXECUTION_MAP = {}
 
-CAPABILITY_EXECUTION_MAP = {
-    "knowledge_storage_v1": execute_knowledge_storage_v1,
-    "communication_broadcast_v1": execute_communication_broadcast_v1,
-    "sequence_executor_v1": execute_sequence_executor_v1,
-    "knowledge_retrieval_v1": execute_knowledge_retrieval_v1,
-    "data_analysis_basic_v1": execute_data_analysis_basic_v1,
-    "data_analysis_v1": execute_data_analysis_v1,
-    "invoke_skill_agent_v1": execute_invoke_skill_agent_v1,
-    "interpret_goal_with_llm_v1": execute_interpret_goal_with_llm_v1,
-    "triangulated_insight_v1": execute_triangulated_insight_v1,
-    "conversational_exchange_llm_v1": execute_conversational_exchange_llm_v1,
-    "export_agent_evolution_v1": execute_export_agent_evolution_v1,
-}
-
-print("[DEBUG] CAPABILITY_EXECUTION_MAP keys at load time:", list(CAPABILITY_EXECUTION_MAP.keys()))
+def register_capability(capability_name: str, handler_function: callable):
+    """
+    Registers a capability handler function.
+    Called by handler modules during their import.
+    """
+    if capability_name in CAPABILITY_EXECUTION_MAP:
+        log(f"[CapabilityExecutor] Warning: Capability '{capability_name}' is being re-registered. Overwriting existing handler.", level="WARN")
+    CAPABILITY_EXECUTION_MAP[capability_name] = handler_function
+    log(f"[CapabilityExecutor] Registered handler for capability: {capability_name} -> {handler_function.__name__}", level="DEBUG")
 
 def execute_capability_by_name(
     capability_name: str,
@@ -91,3 +71,38 @@ def execute_capability_by_name(
             "reward": -1.0,
             "details": {"error": f"Capability '{capability_name}' not found in execution map."},
         }
+
+def _load_and_register_handlers_dynamically():
+    """
+    Scans the 'capability_handlers' directory and imports Python modules
+    to trigger their self-registration process.
+    """
+    # Determine the absolute path to the 'capability_handlers' directory
+    # Assumes 'capability_executor.py' is in 'core/' and 'capability_handlers/' is a sibling to 'core/'
+    current_file_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(current_file_dir) # Goes up one level from 'core' to project root
+    handlers_dir = os.path.join(project_root, "capability_handlers")
+
+    log(f"[CapabilityExecutor] Dynamically loading handlers from: {handlers_dir}", level="INFO")
+
+    for filename in os.listdir(handlers_dir):
+        if filename.endswith(".py") and not filename.startswith("__init__"):
+            module_name_simple = filename[:-3] # e.g., knowledge_handlers
+            module_path = os.path.join(handlers_dir, filename)
+            
+            # Construct a unique module name for importlib, e.g., capability_handlers.knowledge_handlers
+            qualified_module_name = f"capability_handlers.{module_name_simple}"
+
+            try:
+                spec = importlib.util.spec_from_file_location(qualified_module_name, module_path)
+                if spec and spec.loader:
+                    module = importlib.util.module_from_spec(spec)
+                    sys.modules[qualified_module_name] = module # Important for relative imports within the loaded module if any
+                    spec.loader.exec_module(module) # This executes the module, triggering self-registration calls
+                    log(f"[CapabilityExecutor] Loaded and processed handler module: {qualified_module_name}", level="DEBUG")
+            except Exception as e:
+                log(f"[CapabilityExecutor] Error loading handler module {qualified_module_name} from {module_path}: {e}", level="ERROR", exc_info=True)
+    
+    log(f"[CapabilityExecutor] All handler modules processed. Final CAPABILITY_EXECUTION_MAP keys: {list(CAPABILITY_EXECUTION_MAP.keys())}", level="INFO")
+
+_load_and_register_handlers_dynamically()
