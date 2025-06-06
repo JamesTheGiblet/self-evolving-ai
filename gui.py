@@ -1,3 +1,5 @@
+# File: /c:/Users/gilbe/Desktop/self-evolving-ai/gui.py
+
 import customtkinter as ctk
 import threading
 import logging
