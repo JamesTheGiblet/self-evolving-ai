@@ -46,13 +46,12 @@ def delete_main_simulation_log(root_dir):
     else:
         print(f"Main simulation log not found at {main_log_path}. Nothing to delete.")
 
-def clear_logs_directory(root_dir):
-    """Deletes all files and subdirectories within the 'logs' directory."""
-    logs_path = os.path.join(root_dir, "logs")
-    if os.path.exists(logs_path) and os.path.isdir(logs_path):
-        print(f"Clearing contents of directory: {logs_path}")
-        for item_name in os.listdir(logs_path):
-            item_path = os.path.join(logs_path, item_name)
+def clear_directory_contents(dir_path, dir_name_for_log):
+    """Deletes all files and subdirectories within the specified directory."""
+    if os.path.exists(dir_path) and os.path.isdir(dir_path):
+        print(f"Clearing contents of directory: {dir_path}")
+        for item_name in os.listdir(dir_path):
+            item_path = os.path.join(dir_path, item_name)
             try:
                 if os.path.isfile(item_path) or os.path.islink(item_path):
                     os.unlink(item_path)
@@ -62,53 +61,24 @@ def clear_logs_directory(root_dir):
                     print(f"  Deleted directory: {item_path}")
             except Exception as e:
                 print(f"  Error deleting {item_path}: {e}")
-        print(f"Finished clearing {logs_path}.")
+        print(f"Finished clearing {dir_path}.")
     else:
-        print(f"'logs' directory not found at {logs_path} or is not a directory. Nothing to clear.")
+        print(f"'{dir_name_for_log}' directory not found at {dir_path} or is not a directory. Nothing to clear.")
+
+def clear_logs_directory(root_dir):
+    """Clears the 'logs' directory."""
+    logs_path = os.path.join(root_dir, "logs")
+    clear_directory_contents(logs_path, "logs")
 
 def clear_agent_outputs_directory(root_dir):
-    """Deletes all files and subdirectories within the 'agent_outputs' directory."""
+    """Clears the 'agent_outputs' directory."""
     agent_outputs_path = os.path.join(root_dir, "agent_outputs")
-    if os.path.exists(agent_outputs_path) and os.path.isdir(agent_outputs_path):
-        print(f"Clearing contents of directory: {agent_outputs_path}")
-        for item_name in os.listdir(agent_outputs_path):
-            item_path = os.path.join(agent_outputs_path, item_name)
-            try:
-                if os.path.isfile(item_path) or os.path.islink(item_path):
-                    os.unlink(item_path)
-                    print(f"  Deleted file: {item_path}")
-                elif os.path.isdir(item_path):
-                    shutil.rmtree(item_path)
-                    print(f"  Deleted directory: {item_path}")
-            except Exception as e:
-                print(f"  Error deleting {item_path}: {e}")
-        print(f"Finished clearing {agent_outputs_path}.")
-    else:
-        print(f"'agent_outputs' directory not found at {agent_outputs_path} or is not a directory. Nothing to clear.")
+    clear_directory_contents(agent_outputs_path, "agent_outputs")
 
 def clear_agent_data_directory(root_dir):
-    """Deletes all files and subdirectories within the 'agent_data' directory."""
+    """Clears the 'agent_data' directory."""
     agent_data_path = os.path.join(root_dir, "agent_data")
-    if os.path.exists(agent_data_path) and os.path.isdir(agent_data_path):
-        print(f"Clearing contents of directory: {agent_data_path}")
-        # Note: The identity_log.jsonl file is located in the 'identity_data' directory
-        # and is handled by the delete_identity_log() function.
-        # This function, clear_agent_data_directory(), is responsible for clearing
-        # all contents of the 'agent_data' directory itself.
-        for item_name in os.listdir(agent_data_path):
-            item_path = os.path.join(agent_data_path, item_name)
-            try:
-                if os.path.isfile(item_path) or os.path.islink(item_path):
-                    os.unlink(item_path)
-                    print(f"  Deleted file: {item_path}")
-                elif os.path.isdir(item_path):
-                    shutil.rmtree(item_path)
-                    print(f"  Deleted directory: {item_path}")
-            except Exception as e:
-                print(f"  Error deleting {item_path}: {e}")
-        print(f"Finished clearing {agent_data_path}.")
-    else:
-        print(f"'agent_data' directory not found at {agent_data_path} or is not a directory. Nothing to clear.")
+    clear_directory_contents(agent_data_path, "agent_data")
 
 if __name__ == "__main__":
     print(f"Project Root: {PROJECT_ROOT}")
