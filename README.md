@@ -115,56 +115,80 @@ This system is continuously evolving. Here are some of the key capabilities and 
 ### 1. Clone the Repository
 
 ```bash
-git clone [https://github.com/your-org/self-evolving-ai.git](https://github.com/your-org/self-evolving-ai.git)
+git clone https://github.com/your-org/self-evolving-ai.git
 cd self-evolving-ai
+```
 
-2. Create a Virtual Environment
-Bash
-
+### 2. Create a Virtual Environment
+```bash
+# On macOS/Linux
 python3 -m venv venv
 source venv/bin/activate
 
-3. Install Dependencies
-Bash
+# On Windows
+# python -m venv venv
+# .\venv\Scripts\activate
+```
 
+### 3. Install Dependencies
+```bash
 pip install -r requirements.txt
+```
+Note: requirements.txt includes packages for async task handling, data processing, API management, and self-monitoring.
 
-    Note: requirements.txt includes packages for async task handling, data processing, API management, and self-monitoring.
-
-4. Run the System
-Bash
-
+### 4. Run the System
+```bash
 python main.py
+```
 
 🧱 Project Structure
-
 self-evolving-ai/
-├── agents/                   # Base and capability-specific agent definitions
 ├── core/                     # Core evolution engine, context management, and foundational AI logic
 │   ├── agent_base.py            # Abstract base class for all agents
 │   ├── agent_rl.py              # Reinforcement Learning (Q-learning) system for agents
 │   ├── capability_definitions.py # Defines all system capabilities and their parameters
 │   ├── capability_executor.py   # Dispatches capability execution to handlers
-│   ├── capability_handlers.py   # Core execution logic for various capabilities (e.g., knowledge, communication)
+│   ├── capability_registry.py   # Manages and provides access to capability definitions
+│   ├── capability_handlers.py   # Core execution logic for various capabilities
 │   ├── capability_input_preparer.py # Dynamically prepares inputs for capabilities
-│   ├── context_manager.py       # Manages simulation tick, environment state, and time progression
+│   ├── context_manager.py       # Manages simulation tick, environment state, and time
 │   ├── llm_planner.py           # Utilizes LLMs for plan generation and goal interpretation
-│   ├── meta_agent.py            # Orchestrates agents, manages population, and evolution cycles
+│   ├── meta_agent.py            # Orchestrates agents, manages population, and evolution
 │   ├── mutation_engine.py       # Handles evolutionary mutation of agent configurations
 │   ├── performance_tracker.py   # Tracks performance and usage of agent capabilities
 │   ├── roles.py                 # Defines agent roles and their behavioral biases
 │   ├── skill_agent.py           # Base class for skill-specialized agents
 │   ├── skill_definitions.py     # Maps high-level capabilities to specific skill actions
-│   ├── skill_handlers.py        # Handlers for specific skill tool executions (e.g., web, file, maths)
+│   ├── skill_handlers.py        # Handlers for specific skill tool executions
 │   └── task_agent.py            # Agents focused on executing tasks and complex goals
+│   └── utils/                   # Utility functions specific to core components
+│       └── data_extraction.py   # Utilities for extracting data
 ├── api/                      # Flask-based API for system monitoring and interaction
-│   └── system_api.py            # API endpoints for status, agents, feedback
+   ├── __init__.py              # Package initializer
+│   ├── system_api.py            # API endpoints for status, agents, feedback
+│   └── test_system_api.py       # Tests for the system API
+├── utils/                    # General utility modules for the system
+│   ├── logger.py                # System-wide logging utility
+│   ├── openai_api.py            # Wrapper for OpenAI API interactions
+│   ├── test_logger.py           # Tests for the logger
+│   └── test_openai_api.py       # Tests for the OpenAI API wrapper
+├── capabilities/             # Definitions of specific capabilities agents can use
+│   ├── __init__.py              # Package initializer
+│   ├── data_analysis.py         # Data analysis capability definitions
+│   └── test_data_analysis.py    # Tests for data analysis capabilities
 ├── capability_handlers/      # Modular handlers for specific capabilities, imported by core handlers
 │   ├── communication_handlers.py # Handles inter-agent communication capabilities
 │   ├── data_analysis_handlers.py # Handles basic and advanced data analysis capabilities
 │   ├── knowledge_handlers.py    # Handles knowledge storage and retrieval capabilities
 │   ├── planning_handlers.py     # Handles LLM-based planning and goal interpretation capabilities
 │   └── sequence_handlers.py     # Handles sequential execution of capabilities
+│   ├── knowledge_handlers.py    # Handles knowledge storage and retrieval capabilities
+│   ├── planning_handlers.py     # Handles LLM-based planning and goal interpretation capabilities
+│   └── sequence_handlers.py     # Handles sequential execution of capabilities
+│   ├── test_data_analysis_handlers.py # Tests for data analysis handlers
+│   ├── test_knowledge_handlers.py    # Tests for knowledge handlers
+│   ├── test_planning_handlers.py     # Tests for planning handlers
+│   └── test_sequence_handlers.py     # Tests for sequence handlers
 ├── memory/                   # Evolving knowledge and memory handling components
 │   ├── agent_memory.py          # Stores logs and metrics for individual agents
 │   ├── fact_memory.py           # Manages discrete facts (e.g., user-injected knowledge)
@@ -178,9 +202,39 @@ self-evolving-ai/
 │   ├── file_manager.py          # File system operations skill (read, write, list)
 │   ├── maths_tool.py            # Mathematical operations skill (add, subtract, etc.)
 │   ├── web_scraper.py           # Web scraping skill (fetch, get text, find elements)
-│   └── weather.py               # Weather information retrieval skill (simulated)
+│   ├── weather.py               # Weather information retrieval skill (simulated)
+│   ├── test_api_connector_skill.py # Tests for API connector skill
+│   ├── test_calendar_skill.py      # Tests for calendar skill
+│   ├── test_file_manager_skill.py  # Tests for file manager skill
+│   ├── test_maths_tool_skill.py    # Tests for maths tool skill
+│   ├── test_web_scraper_skill.py   # Tests for web scraper skill
+│   └── test_weather_skill.py       # Tests for weather skill
 ├── tests/                    # Unit and integration tests for all modules
-├── logs/                     # Self-assessment and audit trail
+│   ├── __init__.py                          # Package initializer
+│   ├── test_agent_base.py                 # Tests for agent_base.py
+│   ├── test_agent_rl.py                   # Tests for agent_rl.py
+│   ├── test_capability_definitions.py     # Tests for capability definitions logic
+│   ├── test_capability_executor.py        # Tests for capability_executor.py
+│   ├── test_capability_input_preparer.py  # Tests for capability_input_preparer.py
+│   ├── test_capability_handlers.py        # Tests for core capability_handlers.py
+│   ├── test_context_manager.py            # Tests for context_manager.py
+│   ├── test_llm_planner.py                # Tests for llm_planner.py
+│   ├── test_performance_tracker.py        # Tests for performance_tracker.py
+│   ├── test_skill_agent.py                # Tests for skill_agent.py
+│   ├── test_skill_definitions.py          # Tests for skill_definitions.py
+│   ├── test_skill_handlers.py             # Tests for core skill_handlers.py
+│   └── test_task_agent.py                 # Tests for task_agent.py
+├── agent_data/               # Persistent data storage for agents
+│   └── notes.txt                # Example agent data file
+├── agent_outputs/            # Directory for outputs generated by agents
+│   ├── ...                      # Example output files like random_write_X.txt, sequence_output.txt
+│   └── sequence_output.txt      # Example agent output file
+├── logs/                     # Self-assessment, audit trails, and system logs
+├── main.py                   # System bootstrap and main simulation loop execution
+├── gui.py                    # Graphical User Interface for monitoring and interaction
+├── config.py                 # Global configuration settings and environment variables
+├── README.md                 # This file
+└── requirements.txt          # Python dependencies
 ├── main.py                   # System bootstrap and main simulation loop execution
 ├── gui.py                    # Graphical User Interface for monitoring and interaction
 ├── config.py                 # Global configuration settings and environment variables
@@ -188,43 +242,42 @@ self-evolving-ai/
 
 🌐 Use Cases
 
-    Autonomous Backend Infrastructure
-    Living API Systems
-    Digital Ecosystem Simulators
-    Intelligent Middleware Platforms
-    Adaptive Agent-Based Modeling
-
+Autonomous Backend Infrastructure
+Living API Systems
+Digital Ecosystem Simulators
+Intelligent Middleware Platforms
+Adaptive Agent-Based Modeling
 🤝 Contributing
 
 We welcome contributors with interests in:
 
-    Agent-based systems
-    AI evolution and bio-mimicry
-    Distributed architectures
-    Contextual API systems
-    Meta-programming and self-modifying code
-
+Agent-based systems
+AI evolution and bio-mimicry
+Distributed architectures
+Contextual API systems
+Meta-programming and self-modifying code
 Start contributing:
-Bash
 
+```bash
 git checkout -b feature/your-idea
-
+Then submit a pull request with your additions, modifications, or improvements. 🔒 Ethical Considerations
+```
 Then submit a pull request with your additions, modifications, or improvements.
+
 🔒 Ethical Considerations
 
 Self-evolving systems require safeguards:
 
-    Mutation is sandboxed and audited.
-    No external code is executed without deterministic evaluation.
-    Includes a safety kernel to ensure human oversight remains possible.
+Mutation is sandboxed and audited.
+No external code is executed without deterministic evaluation.
+Includes a safety kernel to ensure human oversight remains possible.
 
-    ⚠️ Use in production with caution. Designed for research and controlled experimentation.
-
+⚠️ Use in production with caution. Designed for research and controlled experimentation.
 📛 Name Declaration
 
 The system is designed to name itself based on internal emergent patterns, behavioral maturity, and identity confidence score.
-JSON
 
+json
 {
   "name": "TBD",
   "confidence": 0.31,
@@ -234,42 +287,24 @@ JSON
     "mutation_success_rate": 0.69
   }
 }
-
 When the system reaches a threshold, it will:
 
-    Generate a unique identifier
-    Declare its identity via API /whoami
-    Embed the name across logs and memory as its "self-label"
-
+Generate a unique identifier
+Declare its identity via API /whoami
+Embed the name across logs and memory as its "self-label"
 📚 References
 
-    Bio-Inspired Computing – Melanie Mitchell
-    Multi-Agent Systems – Gerhard Weiss
-    The Self-Model Theory of Subjectivity – Thomas Metzinger
-    Autonomic Computing – IBM Research
-    The Extended Phenotype – Richard Dawkins
+Bio-Inspired Computing – Melanie Mitchell
+Multi-Agent Systems – Gerhard Weiss
+The Self-Model Theory of Subjectivity – Thomas Metzinger
+Autonomic Computing – IBM Research
+The Extended Phenotype – Richard Dawkins
 
 🧭 Roadmap
-Phase	Goal	Status
-Phase 1: Core Framework Initialization	Structural backbone and runtime loop.	✅ Complete
-Phase 2: Agentic Intelligence & Micro-Agent System	Decentralized, modular intelligence model.	✅ Complete
-Phase 3: Self-Assessment & Evolution Engine	Introspection, mutation, and rollback.	✅ Complete
-Phase 4: Adaptive API & Interface Evolution	Context-sensitive APIs and interaction interfaces.	✅ Complete
-Phase 5: Memory, Learning & Knowledge Retention	Dynamic memory, relevance scoring, pattern reuse.	🛠️ In Progress (Milestone: Partially Achieved)
-Phase 6: Self-Naming & Identity Emergence	System derives its own name, purpose, and structure.	🛠️ In Progress (Core Naming Logic Implemented)
-Phase 7: Advanced Cognitive Development & Organizational Intelligence (Praxis MK2)	Integrate intrinsic motivation, creativity, open-ended goals, and higher-order cognition within an advanced agent hierarchy.	🔜 Upcoming
-Phase 8: Embodied Swarm Intelligence & Live Interaction (Praxis MK3 - Protopraxis)	Deploy Praxis as an embodied robotic swarm ("Iterative Swarm AI Framework"), enabling real-world learning and live, explorative interaction with heterogeneous external devices.	🔜 Upcoming
-Phase 9: Ecosystem Orchestration & Generative Intelligence (Praxis MK4)	Evolve Praxis to proactively orchestrate elements of its discovered technological ecosystem and exhibit generative intelligence in problem-solving and system design.	🔜 Upcoming
-Phase 10: Advanced Autonomy & Scientific Co-Discovery (Praxis MK5)	Achieve profound autonomy, enabling Praxis to engage in niche construction, open-ended scientific co-discovery, and deep co-evolution with other complex systems.	🔜 Upcoming
-🚀 Stretch Goals (Current Status)
 
-[x] Integration with LLMs (OpenAI/Local) for natural language communication and planning.
-[x] GUI dashboard with real-time agent map and memory stream visualization.
-[ ] Distributed multi-node support for agent swarms.
-[ ] API plugin framework for evolving extensions (plugin agents).
+For the detailed, phased roadmap, including current status and stretch goals, please refer to the Plan-of-action.ini file.
+
 📬 Contact
 
-For ideas, collaboration, or philosophical debate:
-📧 your.email@domain.com
-🔗 LinkedIn
-🐙 GitHub
+For ideas, collaboration, or philosophical debate: 📧 your.email@domain.com 🔗 LinkedIn 🐙 GitHub
+
