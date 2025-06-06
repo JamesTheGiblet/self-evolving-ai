@@ -2,8 +2,6 @@
 import os
 import sys
 import signal
-import time # Assuming time is used elsewhere in your main
-import threading # Assuming threading is used elsewhereimport logging # Added for logging.INFO
 
 # Add the project root to sys.path to allow absolute imports from main.py
 # This is crucial if main.py is in the root and imports modules from subdirectories like core, skills etc.
@@ -15,8 +13,6 @@ if PROJECT_ROOT not in sys.path:
 from core.context_manager import ContextManager
 from memory.knowledge_base import KnowledgeBase
 from engine.communication_bus import CommunicationBus # Ensure this is used or remove if not
-from core.skill_agent import SkillAgent # For type hinting if needed
-from core.task_agent import TaskAgent
 from core.meta_agent import MetaAgent
 from core.task_router import TaskRouter
 from core.mutation_engine import MutationEngine # Ensure MutationEngine is imported
@@ -28,7 +24,7 @@ from utils.logger import log
 import config # Your main config file
 
 # Import the dynamic skill loader
-from core.skill_loader import load_skills_dynamically, generate_lineage_id_from_skill_name
+from core.skill_loader import load_skills_dynamically
 
 
 # Global reference for shutdown handler
