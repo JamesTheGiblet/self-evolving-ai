@@ -48,6 +48,85 @@ def delete_main_simulation_log(root_dir):
     else:
         print(f"Main simulation log not found at {main_log_path}. Nothing to delete.")
 
+def clear_logs_directory(root_dir):
+    """Deletes all files and subdirectories within the 'logs' directory."""
+    logs_path = os.path.join(root_dir, "logs")
+    if os.path.exists(logs_path) and os.path.isdir(logs_path):
+        print(f"Clearing contents of directory: {logs_path}")
+        for item_name in os.listdir(logs_path):
+            item_path = os.path.join(logs_path, item_name)
+            try:
+                if os.path.isfile(item_path) or os.path.islink(item_path):
+                    os.unlink(item_path)
+                    print(f"  Deleted file: {item_path}")
+                elif os.path.isdir(item_path):
+                    shutil.rmtree(item_path)
+                    print(f"  Deleted directory: {item_path}")
+            except Exception as e:
+                print(f"  Error deleting {item_path}: {e}")
+        print(f"Finished clearing {logs_path}.")
+    else:
+        print(f"'logs' directory not found at {logs_path} or is not a directory. Nothing to clear.")
+
+def clear_agent_outputs_directory(root_dir):
+    """Deletes all files and subdirectories within the 'agent_outputs' directory."""
+    agent_outputs_path = os.path.join(root_dir, "agent_outputs")
+    if os.path.exists(agent_outputs_path) and os.path.isdir(agent_outputs_path):
+        print(f"Clearing contents of directory: {agent_outputs_path}")
+        for item_name in os.listdir(agent_outputs_path):
+            item_path = os.path.join(agent_outputs_path, item_name)
+            try:
+                if os.path.isfile(item_path) or os.path.islink(item_path):
+                    os.unlink(item_path)
+                    print(f"  Deleted file: {item_path}")
+                elif os.path.isdir(item_path):
+                    shutil.rmtree(item_path)
+                    print(f"  Deleted directory: {item_path}")
+            except Exception as e:
+                print(f"  Error deleting {item_path}: {e}")
+        print(f"Finished clearing {agent_outputs_path}.")
+    else:
+        print(f"'agent_outputs' directory not found at {agent_outputs_path} or is not a directory. Nothing to clear.")
+
+def clear_agent_data_directory(root_dir):
+    """Deletes all files and subdirectories within the 'agent_data' directory."""
+    agent_data_path = os.path.join(root_dir, "agent_data")
+    if os.path.exists(agent_data_path) and os.path.isdir(agent_data_path):
+        # Be careful with agent_data, as identity_log.jsonl is inside it.
+        # The delete_identity_log function already handles that specific file.
+        # This function will clear everything else.
+        print(f"Clearing contents of directory: {agent_data_path} (excluding identity_log.jsonl if handled separately)")
+        # The delete_identity_log function should be called *before* this one if you want to preserve its specific message.
+        # Or, this function can just clear everything. For simplicity, let's assume delete_identity_log handles its specific file.
+        # This function will then proceed to delete other files/folders if any.
+        # Re-checking the original script, delete_identity_log is called before general clearing, which is good.
+        # So, this function will clear what's left or the whole directory if delete_identity_log wasn't specific enough.
+        # For robustness, let's make this function clear everything *except* what might be handled by other specific deletions.
+        # However, the current delete_identity_log only deletes the file, not the "identity_data" folder.
+        # The most straightforward approach is to let this function clear the *contents* of agent_data.
+        # If identity_log.jsonl was already deleted, it won't be an issue.
+        for item_name in os.listdir(agent_data_path):
+            item_path = os.path.join(agent_data_path, item_name)
+            # Avoid re-deleting identity_log.jsonl if delete_identity_log is more specific or has special handling.
+            # However, for a full clear, it's fine. Let's make it simple: clear all contents.
+            if item_name == "identity_log.jsonl" and os.path.exists(item_path): # Check if it still exists
+                # This check is mostly for awareness; delete_identity_log should have handled it.
+                # If it's still here, this general clear will get it.
+                pass # It will be handled by the generic logic below.
+
+            try:
+                if os.path.isfile(item_path) or os.path.islink(item_path):
+                    os.unlink(item_path)
+                    print(f"  Deleted file: {item_path}")
+                elif os.path.isdir(item_path):
+                    shutil.rmtree(item_path)
+                    print(f"  Deleted directory: {item_path}")
+            except Exception as e:
+                print(f"  Error deleting {item_path}: {e}")
+        print(f"Finished clearing {agent_data_path}.")
+    else:
+        print(f"'agent_data' directory not found at {agent_data_path} or is not a directory. Nothing to clear.")
+
 if __name__ == "__main__":
     print(f"Project Root: {PROJECT_ROOT}")
     print("\n--- Deleting __pycache__ folders ---")
@@ -55,6 +134,18 @@ if __name__ == "__main__":
 
     print("\n--- Deleting identity log ---")
     delete_identity_log(PROJECT_ROOT)
+
     print("\n--- Deleting main simulation log ---")
     delete_main_simulation_log(PROJECT_ROOT)
+
+    print("\n--- Clearing 'logs' directory ---")
+    clear_logs_directory(PROJECT_ROOT)
+
+    print("\n--- Clearing 'agent_outputs' directory ---")
+    clear_agent_outputs_directory(PROJECT_ROOT)
+
+    # Note: delete_identity_log specifically targets identity_log.jsonl within agent_data.
+    # clear_agent_data_directory will clear any other files/folders in agent_data.
+    print("\n--- Clearing 'agent_data' directory (other contents) ---")
+    clear_agent_data_directory(PROJECT_ROOT) # This will clear remaining contents
     print("\nReset script finished.")

@@ -3,7 +3,7 @@ import os
 import sys
 import signal
 import time # Assuming time is used elsewhere in your main
-import threading # Assuming threading is used elsewhere
+import threading # Assuming threading is used elsewhereimport logging # Added for logging.INFO
 
 # Add the project root to sys.path to allow absolute imports from main.py
 # This is crucial if main.py is in the root and imports modules from subdirectories like core, skills etc.
@@ -22,7 +22,8 @@ from core.task_router import TaskRouter
 from core.mutation_engine import MutationEngine # Ensure MutationEngine is imported
 from gui import SimulationGUI
 from utils import local_llm_connector # Assuming this exists and is setup
-import json # For pretty printing config
+import json # For pretty printing config, if still needed for that.
+# import logging # No longer needed here if setup_logging is removed
 from utils.logger import log
 import config # Your main config file
 
@@ -58,11 +59,13 @@ def main():
 
     # --- Setup Logging and Output Redirection ---
     # Ensure the log directory exists if it's not the root
-    log_dir = os.path.join(config.PROJECT_ROOT_PATH, "logs") # Assuming a 'logs' subdirectory
+    # Note: The print-based logger will now write to simulation.log via stdout.
+    # The 'logs' directory is not strictly necessary for simulation.log in the root,
+    # but kept here if other log files were intended for it.
+    log_dir = os.path.join(config.PROJECT_ROOT_PATH, "logs") 
     if not os.path.exists(log_dir):
         os.makedirs(log_dir, exist_ok=True)
-    
-    log_file_path = os.path.join(config.PROJECT_ROOT_PATH, "simulation.log") # Log file in root
+    log_file_path = os.path.join(config.PROJECT_ROOT_PATH, "simulation.log") 
     sys.stdout = open(log_file_path, 'a', buffering=1) # Redirect stdout to log file, line buffered
 
 
