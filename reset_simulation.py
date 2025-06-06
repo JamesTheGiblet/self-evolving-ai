@@ -92,28 +92,13 @@ def clear_agent_data_directory(root_dir):
     """Deletes all files and subdirectories within the 'agent_data' directory."""
     agent_data_path = os.path.join(root_dir, "agent_data")
     if os.path.exists(agent_data_path) and os.path.isdir(agent_data_path):
-        # Be careful with agent_data, as identity_log.jsonl is inside it.
-        # The delete_identity_log function already handles that specific file.
-        # This function will clear everything else.
-        print(f"Clearing contents of directory: {agent_data_path} (excluding identity_log.jsonl if handled separately)")
-        # The delete_identity_log function should be called *before* this one if you want to preserve its specific message.
-        # Or, this function can just clear everything. For simplicity, let's assume delete_identity_log handles its specific file.
-        # This function will then proceed to delete other files/folders if any.
-        # Re-checking the original script, delete_identity_log is called before general clearing, which is good.
-        # So, this function will clear what's left or the whole directory if delete_identity_log wasn't specific enough.
-        # For robustness, let's make this function clear everything *except* what might be handled by other specific deletions.
-        # However, the current delete_identity_log only deletes the file, not the "identity_data" folder.
-        # The most straightforward approach is to let this function clear the *contents* of agent_data.
-        # If identity_log.jsonl was already deleted, it won't be an issue.
+        print(f"Clearing contents of directory: {agent_data_path}")
+        # Note: The identity_log.jsonl file is located in the 'identity_data' directory
+        # and is handled by the delete_identity_log() function.
+        # This function, clear_agent_data_directory(), is responsible for clearing
+        # all contents of the 'agent_data' directory itself.
         for item_name in os.listdir(agent_data_path):
             item_path = os.path.join(agent_data_path, item_name)
-            # Avoid re-deleting identity_log.jsonl if delete_identity_log is more specific or has special handling.
-            # However, for a full clear, it's fine. Let's make it simple: clear all contents.
-            if item_name == "identity_log.jsonl" and os.path.exists(item_path): # Check if it still exists
-                # This check is mostly for awareness; delete_identity_log should have handled it.
-                # If it's still here, this general clear will get it.
-                pass # It will be handled by the generic logic below.
-
             try:
                 if os.path.isfile(item_path) or os.path.islink(item_path):
                     os.unlink(item_path)
