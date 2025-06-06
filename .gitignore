@@ -16,6 +16,15 @@ ENV/
 *.log
 logs/
 
+# Identity information
+*.json
+identity_data/
+
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# Agent info
+*.txt
+agent_outputs
+agent_data
