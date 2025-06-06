@@ -1,40 +1,37 @@
-# self-evolving-ai/main.py
+# main.py - Entry point for self-evolving-ai
 import os
 import sys
 import signal
 
-# Add the project root to sys.path to allow absolute imports from main.py
-# This is crucial if main.py is in the root and imports modules from subdirectories like core, skills etc.
+# Ensure project root is in sys.path for absolute imports
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-# Now, standard imports should work assuming your project structure
 from core.context_manager import ContextManager
 from memory.knowledge_base import KnowledgeBase
-from engine.communication_bus import CommunicationBus # Ensure this is used or remove if not
+from engine.communication_bus import CommunicationBus
 from core.meta_agent import MetaAgent
 from core.task_router import TaskRouter
-from core.mutation_engine import MutationEngine # Ensure MutationEngine is imported
+from core.mutation_engine import MutationEngine
 from gui import SimulationGUI
-from utils import local_llm_connector # Assuming this exists and is setup
-import json # For pretty printing config, if still needed for that.
-# import logging # No longer needed here if setup_logging is removed
+from utils import local_llm_connector
+import json
 from utils.logger import log
-import config # Your main config file
-
-# Import the dynamic skill loader
+import config
 from core.skill_loader import load_skills_dynamically
 
-
-# Global reference for shutdown handler
+# Global references for shutdown handler
 app_gui_instance = None
-global_context_manager_instance = None # For shutdown handler
+global_context_manager_instance = None
 
 def shutdown_handler(signum, frame):
+    """
+    Handles graceful shutdown on SIGINT/SIGTERM.
+    Attempts to close the GUI if running, otherwise stops the context manager.
+    """
     log(f"Signal {signum} received. Initiating graceful shutdown...")
     if app_gui_instance and hasattr(app_gui_instance, 'on_closing') and callable(app_gui_instance.on_closing):
-        # Check if GUI still exists and is not already in the process of closing
         if app_gui_instance.winfo_exists() and not app_gui_instance._is_closing:
             log("Attempting to close GUI gracefully via after()...")
             app_gui_instance.after(0, app_gui_instance.on_closing)
@@ -42,24 +39,17 @@ def shutdown_handler(signum, frame):
             log("GUI instance no longer exists. Attempting direct context stop.", level="WARN")
             if global_context_manager_instance and hasattr(global_context_manager_instance, 'stop') and callable(global_context_manager_instance.stop):
                 global_context_manager_instance.stop()
-            sys.exit(0) # Fallback exit
-        else: # GUI exists but _is_closing is True
+            sys.exit(0)
+        else:
             log("GUI is already in the process of closing.", level="INFO")
     else:
         log("GUI instance not available or on_closing not callable. Attempting direct context stop and exit.", level="WARN")
         if global_context_manager_instance and hasattr(global_context_manager_instance, 'stop') and callable(global_context_manager_instance.stop):
             global_context_manager_instance.stop()
-        sys.exit(0) # Fallback exit
+        sys.exit(0)
+
 def main():
     global global_context_manager_instance, app_gui_instance
-
-    # --- Logging Setup ---
-    # The custom logger (utils.logger.log) now handles all file logging:
-    # - INFO, DEBUG, WARNING, TRACE messages go to logs/simulation.log.
-    # - ERROR, CRITICAL messages go to logs/fault.log.
-    # Console output from the logger's print() statements will go to the actual console.
-    # sys.stdout redirection is no longer needed for logging purposes.
-
 
     # Setup signal handlers for graceful shutdown
     signal.signal(signal.SIGINT, shutdown_handler)
@@ -67,138 +57,108 @@ def main():
 
     # Initialize core components
     context_manager = ContextManager(tick_interval=config.TICK_INTERVAL)
-    global_context_manager_instance = context_manager # For shutdown handler
-    
-    # If local_llm_connector needs the context manager
+    global_context_manager_instance = context_manager
+
+    # Optionally set context manager on LLM connector if supported
     if hasattr(local_llm_connector, 'set_llm_connector_context_manager'):
         local_llm_connector.set_llm_connector_context_manager(context_manager)
-    
+
     knowledge_base = KnowledgeBase()
     communication_bus = CommunicationBus(enable_logging=True)
 
-    # Instantiate IdentityEngine early, as it's needed by skill_loader and MetaAgent
-    # MetaAgent will now receive this instance instead of creating its own.
-    from engine.identity_engine import IdentityEngine # Ensure correct import path
+    # Instantiate IdentityEngine (needed by skill loader and MetaAgent)
+    from engine.identity_engine import IdentityEngine
     identity_engine_instance = IdentityEngine(
         knowledge_base=knowledge_base,
-        meta_agent_instance=None, # MetaAgent instance will be set later if needed, or refactor IdentityEngine
+        meta_agent_instance=None,
         context_manager=context_manager,
-        # llm_planner and fitness_engine are optional for IdentityEngine
     )
 
-    # --- Dynamic Skill Loading ---
-    # Determine the absolute path to the 'skills' directory relative to this main.py file
-    # Assumes main.py is in the project root, and 'skills' is a subdirectory.
+    # Load skill agents dynamically from the 'skills' directory
     skills_dir = os.path.join(PROJECT_ROOT, "skills")
     log(f"Attempting to load skills from: {skills_dir}", level="INFO")
-    
-    # `dynamic_skill_agents` will be a list of instantiated SkillAgent objects.
-    # `dynamic_default_skill_agent_configs` will be a list of config dictionaries.
     dynamic_skill_agents, dynamic_default_skill_agent_configs = load_skills_dynamically(
         skills_dir_path=skills_dir,
         knowledge_base_instance=knowledge_base,
         context_manager_instance=context_manager,
         communication_bus_instance=communication_bus,
-        identity_engine_instance=identity_engine_instance # Pass IdentityEngine
+        identity_engine_instance=identity_engine_instance
     )
-    
     log(f"Dynamically initialized {len(dynamic_skill_agents)} skill agents.", level="INFO")
-    # For debugging, you might want to print the generated configs:
-    # import json
-    # log(f"Dynamically generated default_skill_agent_configs: {json.dumps(dynamic_default_skill_agent_configs, indent=2, default=lambda o: f'<object {type(o).__name__}>')}", level="DEBUG")
 
-
-    # --- Default Task Agent Configuration ---
+    # Default configuration for the initial task agent
     default_task_agent_config = {
-        "agent_id": "TaskAgent-Gen0_0", # Unique ID for the agent instance
-        "name": "TaskAgent-Gen0_0",     # Display name, can be same as agent_id or more descriptive
+        "agent_id": "TaskAgent-Gen0_0",
+        "name": "TaskAgent-Gen0_0",
         "agent_type": "task",
         "capabilities": [
-            "knowledge_storage_v1", "knowledge_retrieval_v1", 
+            "knowledge_storage_v1", "knowledge_retrieval_v1",
             "communication_broadcast_v1", "sequence_executor_v1",
             "invoke_skill_agent_v1", "interpret_goal_with_llm_v1", "export_agent_evolution_v1",
             "triangulated_insight_v1"
-            # Add other capabilities as defined in capability_definitions.py
         ],
         "capability_params": {
-            "interpret_goal_with_llm_v1": {"llm_model": config.DEFAULT_LLM_MODEL, "energy_cost": 1.0}, # example param
+            "interpret_goal_with_llm_v1": {"llm_model": config.DEFAULT_LLM_MODEL, "energy_cost": 1.0},
             "sequence_executor_v1": {"default_sequence_name": "standard_observe_orient_decide_act"}
         },
-        "behavior_mode": "explore", # or "exploit"
-        "role": "generalist_task",  # As defined in roles.py
-        "initial_state_override": {"energy": config.DEFAULT_INITIAL_ENERGY}, # Example state override
+        "behavior_mode": "explore",
+        "role": "generalist_task",
+        "initial_state_override": {"energy": config.DEFAULT_INITIAL_ENERGY},
         "max_age": config.DEFAULT_MAX_AGENT_AGE,
-        "lineage_id": "TaskAgent-Gen0", # Base lineage ID for this type of task agent
-        "generation": 0 # Initial generation
+        "lineage_id": "TaskAgent-Gen0",
+        "generation": 0
     }
     log(f"Default Task Agent Config: {json.dumps(default_task_agent_config, indent=2)}", level="DEBUG")
 
-    # --- Initialize MetaAgent ---
-    # MetaAgent now receives the list of instantiated skill agents and their default configs
+    # Initialize MetaAgent with loaded skill agents and configs
     meta_agent = MetaAgent(
         context=context_manager,
         knowledge=knowledge_base,
-        communication_bus=communication_bus, 
-        skill_agents=dynamic_skill_agents, # Pass the list of SkillAgent instances
-        identity_engine=identity_engine_instance, # Pass the pre-created IdentityEngine
+        communication_bus=communication_bus,
+        skill_agents=dynamic_skill_agents,
+        identity_engine=identity_engine_instance,
         default_task_agent_config=default_task_agent_config,
-        default_skill_agent_configs=dynamic_default_skill_agent_configs # Pass dynamically generated configs
+        default_skill_agent_configs=dynamic_default_skill_agent_configs
     )
-    
-    # The MetaAgent's __init__ should handle adding the initial_skill_agents
-    # and creating the default task agent. If not, you might need to call:
-    # meta_agent.add_default_agents() or similar method if it exists.
-    # For clarity, let's assume MetaAgent handles this. If you need to manually add the task agent:
-    # task_agent_instance = TaskAgent(context_manager=context_manager, knowledge_base=knowledge_base, communication_bus=communication_bus, **default_task_agent_config)
-    # meta_agent.add_agent(task_agent_instance) # Assuming add_agent exists and categorizes correctly
 
-    # Ensure TaskRouter gets the dynamically loaded skill agents
-    # The TaskRouter likely expects the list of skill agents directly.
-    # We call meta_agent.get_skill_agents() to get the current list.
-    # Assuming TaskRouter's __init__ expects a 'skill_agents' parameter.
+    # Setup TaskRouter with current skill agents
     task_router = TaskRouter(skill_agents=meta_agent.get_skill_agents())
     meta_agent.set_task_router(task_router)
 
-    # Initialize MutationEngine
-    # The MutationEngine needs to know about the "service capabilities" that skill agents can provide.
-    # We can extract these from the dynamically loaded default configs.
+    # Gather all known service capabilities for MutationEngine
     all_known_service_capabilities = list(set(
         cap for config_entry in dynamic_default_skill_agent_configs if config_entry and isinstance(config_entry, dict) for cap in config_entry.get("capabilities", [])
     ))
     log(f"All known service capabilities for MutationEngine: {all_known_service_capabilities}", level="DEBUG")
-    
+
+    # Initialize MutationEngine
     mutation_engine = MutationEngine(
         meta_agent_instance=meta_agent,
         knowledge_base_instance=knowledge_base,
         context_manager_instance=context_manager,
-        # Pass the list of dynamically discovered service capabilities if your MutationEngine uses it
-        # e.g., known_skill_service_capabilities=all_known_service_capabilities
     )
-    # If MutationEngine's MUTATABLE_SKILL_AGENT_CAPABILITIES is a global or class var,
-    # you might need a method to update it, or pass these during init.
-    # For example, if it's a class variable:
-    # MutationEngine.MUTATABLE_SKILL_AGENT_CAPABILITIES.extend(all_known_service_capabilities)
 
-    # Ensure ContextManager has a reference to IdentityEngine for capabilities that might need it
+    # Set IdentityEngine reference on ContextManager
     if hasattr(context_manager, 'set_identity_engine'):
         context_manager.set_identity_engine(identity_engine_instance)
         log("[Main] IdentityEngine set on ContextManager.", level="INFO")
     else:
-        # Fallback if setter doesn't exist, though it should
-        context_manager.identity_engine = identity_engine_instance 
+        context_manager.identity_engine = identity_engine_instance
         log("[Main] IdentityEngine directly set on ContextManager (fallback).", level="WARN")
 
     log("SYSTEM BOOTING...", level="INFO")
 
-    # Initialize GUI *before* starting the simulation loop thread
-    app_gui = SimulationGUI(context_manager=context_manager,
-                            meta_agent=meta_agent,
-                            mutation_engine=mutation_engine, # Pass the mutation engine
-                            knowledge_base=knowledge_base)
-    app_gui_instance = app_gui # For signal handler
-    context_manager.set_gui_instance(app_gui) # Link GUI to context for updates
-    
-    app_gui.mainloop() # This will block until the GUI is closed
+    # Initialize and start the GUI
+    app_gui = SimulationGUI(
+        context_manager=context_manager,
+        meta_agent=meta_agent,
+        mutation_engine=mutation_engine,
+        knowledge_base=knowledge_base
+    )
+    app_gui_instance = app_gui
+    context_manager.set_gui_instance(app_gui)
+
+    app_gui.mainloop()
 
     log("Mainloop finished. System shutdown sequence concluding.")
     if context_manager.is_running():
@@ -207,7 +167,4 @@ def main():
     log("System shutdown complete.")
 
 if __name__ == "__main__":
-    # Ensure the logger is configured before any logging calls
-    # from utils.logger import setup_logging
-    # setup_logging() # Call your logger setup if it's not automatically done on import
     main()
