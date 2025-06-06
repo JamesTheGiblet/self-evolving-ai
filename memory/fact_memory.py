@@ -226,18 +226,17 @@ class FactMemory:
 
     def apply_decay_and_pruning(self, current_tick: Optional[int] = None):
         """Periodically apply decay to all facts and prune those below threshold."""
-        facts_to_prune = []
+        facts_to_prune_with_score: List[tuple[str, float]] = [] # Store (fact_id, relevance_score)
         for fact_id, fact in list(self._facts.items()): # Iterate over a copy for safe deletion
             # Update relevance using the new mechanism
             self._update_fact_relevance_and_access(fact, current_tick)
             if fact.current_relevance_score < KB_PRUNING_THRESHOLD:
-                facts_to_prune.append(fact_id)
+                facts_to_prune_with_score.append((fact_id, fact.current_relevance_score))
         
         pruned_count = 0
-        for fact_id in facts_to_prune:
-            log_fact_relevance = self._facts.get(fact_id).current_relevance_score if fact_id in self._facts else "N/A"
-            if self.remove_fact(fact_id): # Ensure fact is removed before logging its (potentially old) relevance
-                log(f"[FactMemory] Pruned fact '{fact_id}' due to low relevance ({log_fact_relevance:.2f} < {KB_PRUNING_THRESHOLD}).", level="INFO")
+        for fact_id, relevance_at_pruning in facts_to_prune_with_score:
+            if self.remove_fact(fact_id):
+                log(f"[FactMemory] Pruned fact '{fact_id}' due to low relevance ({relevance_at_pruning:.2f} < {KB_PRUNING_THRESHOLD}).", level="INFO")
                 pruned_count +=1
         if pruned_count > 0:
             log(f"[FactMemory] Applied decay and pruning. Pruned {pruned_count} facts.", level="DEBUG")

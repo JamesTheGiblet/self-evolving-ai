@@ -16,7 +16,6 @@ def update_access_metadata(item_metadata: Dict[str, Any], current_tick: int) -> 
     Args:
         item_metadata: A dictionary containing at least 'last_accessed_tick' and 'access_count'.
         current_tick: The current simulation tick.
-        current_timestamp: The current Unix timestamp.
 
     Returns:
         The updated item_metadata dictionary.

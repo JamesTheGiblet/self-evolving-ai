@@ -105,8 +105,7 @@ class KnowledgeBase:
         Updates an item's access metadata and recalculates its relevance score.
         """
         item_meta = self._get_item_metadata_dict(lineage_id, item_id)
-        current_timestamp = time.time() # Get current time for timestamp-based updates
-        item_meta = update_access_metadata(item_meta, current_tick, current_timestamp)
+        item_meta = update_access_metadata(item_meta, current_tick) # Corrected call
         new_relevance = calculate_relevance_score(item_meta, self.relevance_params)
         item_meta["relevance_score"] = new_relevance
         self._save_item_metadata(lineage_id, item_id, item_meta)
@@ -155,70 +154,9 @@ class KnowledgeBase:
         
         # Retrieve full entries first to update access and sort by relevance
         full_entries = self.retrieve_full_entries(lineage_id, query_params, current_tick)
-
-        if not query_params:
-            # log(f"[KnowledgeBase] Retrieved {len(lineage_data)} data items for lineage '{safe_lineage_id}' with query: None.", level="DEBUG")
-            return [entry["data"] for entry in full_entries] # Return only the 'data' part
-        
-        # Filtering logic is now primarily in retrieve_full_entries.
-        # This method now just extracts the "data" part from what retrieve_full_entries returns.
-        # Note: The original filtering logic here is somewhat redundant if retrieve_full_entries is called first.
-        # For simplicity, we'll rely on retrieve_full_entries to do the heavy lifting of filtering and sorting.
-        # Then we just extract the data.
-        
-        # This part of the original code can be simplified as retrieve_full_entries handles most of it.
-        # However, to maintain the structure of applying filters if query_params are present:
-
-        # data_matches_filter = query_params.get("data_matches")
-        # limit = query_params.get("limit") # Limit is applied in retrieve_full_entries
-        # ... other filters ...
-        temp_results_for_sorting = []
-
-        for entry in reversed(lineage_data): # Iterate reversed for recent items first by default
-            item_data = entry.get("data", {})
-            item_tick = entry.get("tick", -1)
-            item_storing_agent = entry.get("storing_agent_name")
-
-            # This filtering is largely duplicated in retrieve_full_entries.
-            # Consider removing if retrieve_full_entries is always the source.
-            # For now, keeping it to show how it would work if this method did its own filtering.
-            data_matches_filter = query_params.get("data_matches") # Re-fetch for this scope
-            min_tick = query_params.get("min_tick")
-            max_tick = query_params.get("max_tick")
-            storing_agent_name_filter = query_params.get("storing_agent_name")
-
-            # Tick filtering
-            if min_tick is not None and item_tick < min_tick:
-                continue
-            if max_tick is not None and item_tick > max_tick:
-                continue
-            
-            # Storing agent name filtering
-            if storing_agent_name_filter and item_storing_agent != storing_agent_name_filter:
-                continue
-
-            # Data matching filter (simple key-value check in the payload)
-            if data_matches_filter and isinstance(item_data, dict) and isinstance(data_matches_filter, dict):
-                match = True
-                for key, value in data_matches_filter.items():
-                    if item_data.get(key) != value:
-                        match = False
-                        break
-                if not match:
-                    continue
-            
-            # If we are here, the item matches. Add its data.
-            # However, retrieve_full_entries already did this and sorted.
-            # So, this loop is not strictly necessary if full_entries is used.
-            # temp_results_for_sorting.append(entry["data"])
-
-        # If using full_entries from retrieve_full_entries:
+        # Extract only the 'data' part from the full entries.
+        # retrieve_full_entries handles all filtering, relevance updates, and sorting.
         filtered_results = [e["data"] for e in full_entries]
-
-        # Apply limit if it wasn't applied in retrieve_full_entries or if this method has its own limit logic
-        # limit = query_params.get("limit") # Already handled by retrieve_full_entries
-        # if limit is not None:
-        #     filtered_results = filtered_results[:limit]
             
         log(f"[KnowledgeBase] Retrieved {len(filtered_results)} data items for lineage '{safe_lineage_id}' with query: {query_params}. Tick: {current_tick}", level="DEBUG")
         return filtered_results
