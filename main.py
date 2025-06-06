@@ -57,16 +57,12 @@ def shutdown_handler(signum, frame):
 def main():
     global global_context_manager_instance, app_gui_instance
 
-    # --- Setup Logging and Output Redirection ---
-    # Ensure the log directory exists if it's not the root
-    # Note: The print-based logger will now write to simulation.log via stdout.
-    # The 'logs' directory is not strictly necessary for simulation.log in the root,
-    # but kept here if other log files were intended for it.
-    log_dir = os.path.join(config.PROJECT_ROOT_PATH, "logs") 
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir, exist_ok=True)
-    log_file_path = os.path.join(config.PROJECT_ROOT_PATH, "simulation.log") 
-    sys.stdout = open(log_file_path, 'a', buffering=1) # Redirect stdout to log file, line buffered
+    # --- Logging Setup ---
+    # The custom logger (utils.logger.log) now handles all file logging:
+    # - INFO, DEBUG, WARNING, TRACE messages go to logs/simulation.log.
+    # - ERROR, CRITICAL messages go to logs/fault.log.
+    # Console output from the logger's print() statements will go to the actual console.
+    # sys.stdout redirection is no longer needed for logging purposes.
 
 
     # Setup signal handlers for graceful shutdown

@@ -35,10 +35,8 @@ def delete_identity_log(root_dir):
         print(f"Identity log not found at {identity_log_path}. Nothing to delete.")
 
 def delete_main_simulation_log(root_dir):
-    """Deletes the main simulation.log file."""
-    # Assuming the main log file is named 'simulation.log' and is in the project root.
-    # Adjust the name if your main log file has a different name or path.
-    main_log_path = os.path.join(root_dir, "simulation.log")
+    """Deletes the simulation.log file from the 'logs' directory."""
+    main_log_path = os.path.join(root_dir, "logs", "simulation.log")
     if os.path.exists(main_log_path):
         try:
             os.remove(main_log_path)
