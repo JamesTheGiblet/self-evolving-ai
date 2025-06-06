@@ -131,10 +131,9 @@ This guide outlines the steps and requirements for adding a new skill to the sel
     - [ ] Sets `self.skill_name`.
     - [ ] Calls `super().__init__(skill_name=self.skill_name)`.
     - [ ] Sets `self.description`.
-    - [ ] Initializes `self.commands` dictionary.
 - [ ] `get_capabilities()` method is overridden and returns the correct dictionary structure.
 - [ ] `_execute_skill(self, args: list)` method is implemented to handle commands.
-- [ ] All command handler methods return JSON strings via `self._create_json_response()`.
+- [ ] All command handler methods return Python dictionaries via `self._build_response_dict()`.
 - [ ] (Optional) Dependencies configured in `skill_loader.py` if needed.
 - [ ] (Recommended) Unit tests created.
 
