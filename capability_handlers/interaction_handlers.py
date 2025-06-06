@@ -21,75 +21,43 @@ def execute_invoke_skill_agent_v1(agent: 'BaseAgent', params_used: dict, cap_inp
 
     # 1. Determine the final skill_action_to_request
     final_skill_action_to_request = cap_inputs.get("skill_action_to_request")
-    log_suffix_decision = "(from cap_inputs)" if final_skill_action_to_request else ""
 
     if not final_skill_action_to_request:
-        final_skill_action_to_request = params_used.get("default_skill_action_to_attempt")
-        log_suffix_decision = "(from agent_params)" if final_skill_action_to_request else ""
-        if not final_skill_action_to_request:
-            globally_preferable_skill_actions = [
-                "maths_operation", "log_summary", "complexity_analysis", # Align with CapabilityInputPreparer
-                "web_operation", "file_operation", "api_call"
-            ]
-            action_weights = [1.0] * len(globally_preferable_skill_actions)
-            last_failure = agent.state.get('last_failed_skill_details')
-            current_tick_for_prep = context.get_tick()
+        # This means the preparer explicitly set it to None or it was missing.
+        preparer_error = cap_inputs.get("request_data", {}).get("error", "Required 'skill_action_to_request' not provided by preparer or is None.")
+        log(f"[{agent.name}] InvokeSkill: Failing because 'skill_action_to_request' is missing or None. Preparer error: {preparer_error}", level="ERROR")
+        return {"outcome": "failure_missing_skill_action", "reward": -0.4, "details": {"error": preparer_error}}
 
-            if last_failure and (current_tick_for_prep - last_failure.get("tick", -1000)) < 3:
-                failed_action_type = last_failure.get("action_requested")
-                if failed_action_type in globally_preferable_skill_actions:
-                    try:
-                        idx = globally_preferable_skill_actions.index(failed_action_type)
-                        action_weights[idx] = 0.1
-                    except ValueError: pass
-            
-            if not globally_preferable_skill_actions:
-                log(f"[{agent.name}] InvokeSkill: No globally preferable skill actions defined.", level="ERROR")
-                return {"outcome": "failure_preparation_no_skill_type", "reward": -0.4, "details": {"error": "No skill types to choose from."}}
-            final_skill_action_to_request = random.choices(globally_preferable_skill_actions, weights=action_weights, k=1)[0]
-            log_suffix_decision = "(agent_decided_probabilistic)"
-
-    if not final_skill_action_to_request:
-        log(f"[{agent.name}] InvokeSkill: Could not determine a skill action to request.", level="ERROR")
-        return {"outcome": "failure_preparation_no_skill_action", "reward": -0.4, "details": {"error": "Skill action could not be determined."}}
-
-    log(f"[{agent.name}] InvokeSkill: Determined skill action '{final_skill_action_to_request}' {log_suffix_decision}.")
+    log(f"[{agent.name}] InvokeSkill: Using skill action '{final_skill_action_to_request}' from cap_inputs.")
 
     # --- Extract the specific command for agent lookup ---
     # final_skill_action_to_request is the CATEGORY (e.g., "file_operation")
     # final_request_data (populated later) will contain the specific command (e.g., {"file_command": "list ./path"})
     # We need the specific command to match against SKILL_CAPABILITY_MAPPING values.
     
-    # Temporarily populate final_request_data to extract the specific command for lookup
-    # This logic mirrors the later population of final_request_data.
-    temp_request_data_for_lookup = cap_inputs.get("request_data", {}).copy()
-    if final_skill_action_to_request == "maths_operation" and "maths_command" not in temp_request_data_for_lookup:
-        temp_request_data_for_lookup["maths_command"] = "add 0 0" # Placeholder for lookup
-    elif final_skill_action_to_request == "web_operation" and "web_command" not in temp_request_data_for_lookup:
-        temp_request_data_for_lookup["web_command"] = "fetch example.com" # Placeholder
-    elif final_skill_action_to_request == "file_operation" and "file_command" not in temp_request_data_for_lookup:
-        temp_request_data_for_lookup["file_command"] = "list ." # Placeholder
-    elif final_skill_action_to_request == "api_call" and "api_command" not in temp_request_data_for_lookup:
-        temp_request_data_for_lookup["api_command"] = "get_joke" # Placeholder
-    elif final_skill_action_to_request in ["log_summary", "complexity", "basic_stats"]: # These are specific enough
-        if "analysis_type" not in temp_request_data_for_lookup: temp_request_data_for_lookup["analysis_type"] = final_skill_action_to_request
+    # specific_command_for_lookup should be derived from the actual request_data provided by the preparer.
+    actual_request_data_for_lookup = cap_inputs.get("request_data", {})
 
     specific_command_for_lookup = None
     if final_skill_action_to_request == "file_operation":
-        specific_command_for_lookup = temp_request_data_for_lookup.get("file_command", "").split(' ')[0]
+        specific_command_for_lookup = actual_request_data_for_lookup.get("file_command", "").split(' ')[0]
     elif final_skill_action_to_request == "maths_operation":
-        specific_command_for_lookup = temp_request_data_for_lookup.get("maths_command", "").split(' ')[0]
+        specific_command_for_lookup = actual_request_data_for_lookup.get("maths_command", "").split(' ')[0]
     elif final_skill_action_to_request == "web_operation":
-        specific_command_for_lookup = temp_request_data_for_lookup.get("web_command", "").split(' ')[0]
+        specific_command_for_lookup = actual_request_data_for_lookup.get("web_command", "").split(' ')[0]
     elif final_skill_action_to_request == "api_call":
-        specific_command_for_lookup = temp_request_data_for_lookup.get("api_command", "").split(' ')[0]
+        specific_command_for_lookup = actual_request_data_for_lookup.get("api_command", "").split(' ')[0]
     elif final_skill_action_to_request in ["log_summary", "complexity_analysis", "basic_stats_analysis"]: # Match skill tool commands
         specific_command_for_lookup = final_skill_action_to_request # The category name is the command
 
-
     if not specific_command_for_lookup:
-        log(f"[{agent.name}] InvokeSkill: Could not determine specific command for lookup from category '{final_skill_action_to_request}' and data {temp_request_data_for_lookup}.", level="ERROR")
-        return {"outcome": "failure_preparation_no_specific_command", "reward": -0.4, "details": {"error": "Specific command for lookup could not be determined."}}
+        preparer_error_for_unknown_action = cap_inputs.get("request_data", {}).get("error") # Check if preparer flagged this action as unknown
+        error_detail_msg = f"Could not determine specific command for lookup from category '{final_skill_action_to_request}'."
+        if preparer_error_for_unknown_action:
+            error_detail_msg = f"Preparer flagged action '{final_skill_action_to_request}' as problematic: {preparer_error_for_unknown_action}"
+        
+        log(f"[{agent.name}] InvokeSkill: {error_detail_msg}", level="ERROR")
+        return {"outcome": "failure_invalid_skill_action_type", "reward": -0.4, "details": {"error": error_detail_msg, "received_skill_action": final_skill_action_to_request}}
 
     log(f"[{agent.name}] InvokeSkill: Specific command for agent lookup: '{specific_command_for_lookup}' (derived from category '{final_skill_action_to_request}').")
 
@@ -145,27 +113,8 @@ def execute_invoke_skill_agent_v1(agent: 'BaseAgent', params_used: dict, cap_inp
             log(f"[{agent.name}] InvokeSkill: No suitable target agent found for specific command '{specific_command_for_lookup}' (derived from category '{final_skill_action_to_request}'). Suitable: {suitable_agents_for_action}, All Skill Agents: {list(available_skill_agents_info.keys())}", level="WARNING")
             return {"outcome": "failure_no_suitable_target_agent", "reward": -0.3, "details": {"error": f"No suitable agent for specific command '{specific_command_for_lookup}' (category: '{final_skill_action_to_request}')."}}
 
-    final_request_data = cap_inputs.get("request_data", {}).copy() 
-    if final_skill_action_to_request == "maths_operation" and "maths_command" not in final_request_data:
-        final_request_data["maths_command"] = random.choice(["add 1 2", "subtract 5 3", "multiply 2 3", "divide 10 2"])
-    elif final_skill_action_to_request == "web_operation" and "web_command" not in final_request_data:
-        final_request_data["web_command"] = random.choice(["fetch https://example.com", "get_text https://www.python.org"])
-    elif final_skill_action_to_request == "file_operation" and "file_command" not in final_request_data:
-        file_action = random.choice(["list", "read", "write"])
-        example_paths = ["./agent_data/notes.txt", "./logs/", f"./agent_outputs/random_write_{context.get_tick()}.txt"]
-        target_path = random.choice(example_paths)
-        command_to_send = f"{file_action} {target_path}"
-        if file_action == "write":
-            content_for_write = f"Random content written by {agent.name} at tick {context.get_tick()}."
-            escaped_content = content_for_write.replace('"', '\\"') # Basic escaping
-            command_to_send = f"{file_action} {target_path} \"{escaped_content}\""
-        final_request_data["file_command"] = command_to_send
-    elif final_skill_action_to_request == "api_call" and "api_command" not in final_request_data:
-        final_request_data["api_command"] = random.choice(["get_joke", "get_weather 34.05 -118.24"])
-    elif final_skill_action_to_request in ["log_summary", "complexity_analysis", "basic_stats_analysis"] :
-        if "data_points" not in final_request_data: final_request_data["data_points"] = [] 
-        # Ensure analysis_type in request_data matches the skill_action_to_request for these specific actions
-        final_request_data["analysis_type"] = final_skill_action_to_request
+    # final_request_data should come directly from cap_inputs, as prepared by CapabilityInputPreparer.
+    final_request_data = cap_inputs.get("request_data", {})
 
     timeout_duration = cap_inputs.get("timeout_duration", params_used.get("timeout_duration", 5.0))
     success_reward = cap_inputs.get("success_reward", params_used.get("success_reward", 0.75))
