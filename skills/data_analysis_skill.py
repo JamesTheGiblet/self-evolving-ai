@@ -7,7 +7,7 @@ import re
 from typing import Any, Dict, List
 from skills.base_skill import BaseSkillTool
 from utils.logger import log
-from core.utils.data_extraction import _extract_data_recursively # Assuming this utility is available
+from utils.data_extraction import _extract_data_recursively # Assuming this utility is available
 from core.constants import DEFAULT_STOP_WORDS # Assuming this utility is available
 
 class DataAnalysisSkillTool(BaseSkillTool): # Inherits from BaseSkillTool

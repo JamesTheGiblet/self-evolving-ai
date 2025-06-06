@@ -11,7 +11,7 @@ from config import (
     KB_RECENCY_DECAY_RATE_PER_DAY, KB_ACCESS_COUNT_CAP_FOR_RELEVANCE # Ensure these are available
 )
 from utils.logger import log
-from core.utils.memory_relevance_utils import update_access_metadata, calculate_relevance_score
+from utils.memory_relevance_utils import update_access_metadata, calculate_relevance_score
 
 class Fact:
     """Represents a single piece of factual information."""

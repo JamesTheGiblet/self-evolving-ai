@@ -23,6 +23,7 @@ def update_access_metadata(item_metadata: Dict[str, Any], current_tick: int) -> 
     """
     if current_tick is not None:
         item_metadata["last_accessed_tick"] = current_tick
+    current_timestamp = time.time()  # Define current_timestamp
     item_metadata["last_accessed_timestamp"] = current_timestamp # Always update timestamp
     item_metadata["access_count"] = item_metadata.get("access_count", 0) + 1
     return item_metadata

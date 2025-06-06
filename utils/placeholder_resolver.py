@@ -5,7 +5,7 @@ import re
 from utils.logger import log
 
 # Assuming _extract_data_recursively is available and correctly resolves paths in nested dicts/lists
-from core.utils.data_extraction import _extract_data_recursively as get_value_from_path
+from .data_extraction import _extract_data_recursively as get_value_from_path
 
 PLACEHOLDER_PATTERN = re.compile(r"<FROM_PREVIOUS_STEP:([^>]+)>")
 

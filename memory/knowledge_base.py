@@ -6,7 +6,7 @@ from memory.fact_memory import Fact, FactMemory # Import Fact and FactMemory
 import time
 import re # For basic keyword searching
 import uuid
-from core.utils.memory_relevance_utils import update_access_metadata, calculate_relevance_score
+from utils.memory_relevance_utils import update_access_metadata, calculate_relevance_score
 import config
 from config import (
     KB_INITIAL_RELEVANCE_SCORE, KB_MAX_RELEVANCE_SCORE, KB_DECAY_RATE_PER_DAY,
