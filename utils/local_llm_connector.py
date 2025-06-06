@@ -1,4 +1,4 @@
-# c:\Users\gilbe\Desktop\self-evolving-ai\utils\local_llm_connector.py
+# local_llm_connector.py
 import requests
 import time # For retry delay
 import json
