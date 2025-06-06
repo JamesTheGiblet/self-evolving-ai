@@ -6,7 +6,7 @@ import time
 from typing import Dict, Any, TYPE_CHECKING, Optional, List
 import uuid
 from core.agent_base import BaseAgent
-from core.llm_planner import LLMPlanner
+# from core.llm_planner import LLMPlanner # LLMPlanner is used by interpret_goal_with_llm_v1 capability
 from utils.logger import log
 from core.skill_definitions import SKILL_CAPABILITY_MAPPING
 from core.performance_tracker import CapabilityPerformanceTracker
@@ -125,6 +125,7 @@ class TaskAgent(BaseAgent):
         self.input_preparer: 'CapabilityInputPreparer' = CapabilityInputPreparer(skill_capability_mapping=SCM)
 
         self.all_agent_names_in_system_cache: List[str] = []
+        self.current_skill_action_registry: Dict[str, List[str]] = {} # To be populated by MetaAgent
         
         log(f"[{self.name} ID:{self.id}] TaskAgent initialized. Role: {self.role}, Behavior: {self.behavior_mode}, Initial Energy: {self.initial_energy:.2f}")
 
@@ -134,30 +135,31 @@ class TaskAgent(BaseAgent):
             log(f"[{self.name}] find_best_skill_agent_for_action: No skill_action_to_request provided.", level="WARNING")
             return None
 
-        # Use self.agent_info_map which is updated by MetaAgent during run()
-        available_skill_agents_info = {
-            name: info for name, info in self.agent_info_map.items() 
-            if info.get("agent_type") == "skill" 
-            and info.get("is_active", True) 
-        }
-        if not available_skill_agents_info:
-            log(f"[{self.name}] find_best_skill_agent_for_action: No skill agents available in agent_info_map.", level="WARNING")
+        # Get potential agent names from the dynamic registry provided by MetaAgent
+        potential_agent_names = self.current_skill_action_registry.get(skill_action_to_request, [])
+
+        if not potential_agent_names:
+            log(f"[{self.name}] find_best_skill_agent_for_action: No SkillAgents registered for action '{skill_action_to_request}' in current_skill_action_registry.", level="WARNING")
             return None
 
-        suitable_agents_for_action = []
-        for sa_name, sa_info in available_skill_agents_info.items():
-            sa_configured_caps = sa_info.get("capabilities", [])
-            performable_by_sa = []
-            for conf_cap in sa_configured_caps:
-                performable_by_sa.extend(SKILL_CAPABILITY_MAPPING.get(conf_cap, []))
-            if skill_action_to_request in set(performable_by_sa):
-                suitable_agents_for_action.append(sa_name)
+        # Filter these potential agents by their active status using self.agent_info_map
+        active_and_capable_agents = [
+            name for name in potential_agent_names
+            if self.agent_info_map.get(name, {}).get("agent_type") == "skill" and \
+               self.agent_info_map.get(name, {}).get("is_active", False)
+        ]
+
+        if not active_and_capable_agents:
+            log(f"[{self.name}] find_best_skill_agent_for_action: Found {len(potential_agent_names)} agents for action '{skill_action_to_request}', but none are currently active or in agent_info_map.", level="WARNING")
+            return None
+
+        log(f"[{self.name}] find_best_skill_agent_for_action: Active agents for '{skill_action_to_request}': {active_and_capable_agents}", level="DEBUG")
 
         chosen_target_skill_agent_id = None
         if preferred_target_id:
             # Check if the preferred_target_id is a lineage prefix for any suitable agents
             agents_in_preferred_lineage = [
-                sa_name for sa_name in suitable_agents_for_action
+                sa_name for sa_name in active_and_capable_agents
                 if sa_name.startswith(preferred_target_id) # Lineage match
             ]
             if agents_in_preferred_lineage:
@@ -167,15 +169,15 @@ class TaskAgent(BaseAgent):
                 log(f"[{self.name}] find_best_skill_agent_for_action: Using agent '{chosen_target_skill_agent_id}' from preferred lineage '{preferred_target_id}' for action '{skill_action_to_request}'.")
             else:
                 # Preferred lineage ID was given, but no suitable (or active) agent from that lineage can perform the action.
-                log(f"[{self.name}] find_best_skill_agent_for_action: No suitable agent from preferred lineage '{preferred_target_id}' can perform '{skill_action_to_request}'. Looking for any suitable alternative. Suitable for action: {suitable_agents_for_action}", level="WARNING")
+                log(f"[{self.name}] find_best_skill_agent_for_action: No suitable agent from preferred lineage '{preferred_target_id}' can perform '{skill_action_to_request}'. Looking for any suitable alternative. Active & capable: {active_and_capable_agents}", level="WARNING")
         
         # Fallback if no preferred target was given, or if preferred lineage had no suitable agent
-        if not chosen_target_skill_agent_id and suitable_agents_for_action: # Check suitable_agents_for_action again
-            chosen_target_skill_agent_id = random.choice(suitable_agents_for_action)
-            log(f"[{self.name}] find_best_skill_agent_for_action: Selected suitable agent '{chosen_target_skill_agent_id}' for action '{skill_action_to_request}'. Suitable: {suitable_agents_for_action}")
+        if not chosen_target_skill_agent_id and active_and_capable_agents: # Check active_and_capable_agents again
+            chosen_target_skill_agent_id = random.choice(active_and_capable_agents)
+            log(f"[{self.name}] find_best_skill_agent_for_action: Selected suitable agent '{chosen_target_skill_agent_id}' for action '{skill_action_to_request}'. Active & capable: {active_and_capable_agents}")
         
         if not chosen_target_skill_agent_id:
-            log(f"[{self.name}] find_best_skill_agent_for_action: No suitable target agent found for skill action '{skill_action_to_request}'. Suitable: {suitable_agents_for_action}, All Skill Agents: {list(available_skill_agents_info.keys())}", level="WARNING")
+            log(f"[{self.name}] find_best_skill_agent_for_action: No suitable target agent found for skill action '{skill_action_to_request}'. Active & capable: {active_and_capable_agents}, All registered for action: {potential_agent_names}", level="WARNING")
             return None
             
         return chosen_target_skill_agent_id
@@ -352,6 +354,7 @@ class TaskAgent(BaseAgent):
                     if interpretation_result.get("outcome") == "success_goal_interpreted":
                         parsed_action_details = interpretation_result.get("details", {})
                         log(f"[{self.name}] LLM interpreted user goal into: {parsed_action_details}", level="INFO")
+                        # This part assumes interpret_goal_with_llm_v1 returns a dict that can be used to set a new goal
                         if parsed_action_details.get("type") == "invoke_skill":
                             self.set_goal({
                                 "type": "execute_parsed_skill_invocation",
@@ -359,12 +362,20 @@ class TaskAgent(BaseAgent):
                                 "original_user_query": goal_description
                             })
                         else:
-                            log(f"[{self.name}] LLM interpretation result type '{parsed_action_details.get('type')}' not yet fully handled. Setting to idle.", level="WARN")
+                            # If the LLM returns a plan (list of steps), set goal to execute it
+                            if isinstance(parsed_action_details, list): # Assuming the plan is directly in details
+                                self.set_goal({
+                                    "type": "execute_llm_generated_plan",
+                                    "details": {"plan_to_execute": parsed_action_details, "original_user_query": goal_description}
+                                })
+                            else:
+                                log(f"[{self.name}] LLM interpretation result type '{parsed_action_details.get('type')}' or structure not directly actionable for new goal. Setting to idle. Details: {parsed_action_details}", level="WARN")
                             self.current_goal = {"type": "idle", "reason": "llm_interpretation_unhandled_type"}
                     elif interpretation_result.get("outcome") == "pending_llm_interpretation":
                         log(f"[{self.name}] LLM interpretation for user goal is pending. Request ID: {interpretation_result.get('details', {}).get('request_id')}")
+                        # Goal remains 'user_defined_goal' or 'interpret_user_goal', pending LLM response.
                     else:
-                        log(f"[{self.name}] Failed to interpret user goal with LLM. Result: {interpretation_result}", level="WARNING")
+                        log(f"[{self.name}] Failed to interpret user goal with LLM. Result: {interpretation_result}. Setting to idle.", level="WARNING")
                         self.current_goal = {"type": "idle", "reason": "llm_interpretation_failed"}
                     self._update_state_after_action(initial_rl_state_for_interpret, "interpret_goal_with_llm_v1", interpretation_result)
 
@@ -568,6 +579,7 @@ class TaskAgent(BaseAgent):
                     if llm_content:
                         is_success = True
                         reward_to_apply = req_details["success_reward"]
+                        from core.llm_planner import LLMPlanner # Local import for parsing
                         
                         if req_details["capability_initiated"] == "interpret_goal_with_llm_v1":
                             try:
@@ -685,11 +697,16 @@ class TaskAgent(BaseAgent):
                   (energy_bonus * 0.1)
         fitness = max(0.0, min(1.0, fitness))
         
-        log(f"[{self.name}] Fitness Calc: Fit={fitness:.3f} (NumActions/Execs:{num_actions}, AvgRw:{average_reward:.2f}, NormRw:{normalized_reward_component:.2f}, "
-            f"Surv:{survival_bonus:.2f}, Ins:{insight_bonus:.2f}, En:{energy_bonus:.3f} ({self.energy:.1f}/{self.initial_energy:.1f}))", level="INFO") 
+        # Log level changed to DEBUG to reduce verbosity, INFO can be used if this specific log is frequently monitored.
+        log(f"[{self.name}] Fitness Calc: Fit={fitness:.3f} (NumActions/Execs:{num_actions}, AvgRw:{average_reward:.2f}, NormRw:{normalized_reward_component:.2f}, Surv:{survival_bonus:.2f}, Ins:{insight_bonus:.2f}, En:{energy_bonus:.3f} ({self.energy:.1f}/{self.initial_energy:.1f}))", level="DEBUG")
         return {"fitness": fitness, "executions": float(num_actions), "average_reward": average_reward}
 
-    def run(self, context: 'ContextManager', knowledge: 'KnowledgeBase', all_agent_names_in_system: list, agent_info_map: Dict[str, Dict[str, Any]]):
+    def run(self,
+            context: 'ContextManager',
+            knowledge: 'KnowledgeBase',
+            all_agent_names_in_system: list,
+            agent_info_map: Dict[str, Dict[str, Any]],
+            skill_action_registry: Dict[str, List[str]]): # Added skill_action_registry
         current_sim_tick = context.get_tick()
         self.agent_info_map = agent_info_map
         self.all_agent_names_in_system_cache = all_agent_names_in_system
@@ -697,6 +714,7 @@ class TaskAgent(BaseAgent):
         if not super().run_cycle():
             log(f"[{self.name} Tick:{current_sim_tick}] Base run_cycle returned False. Status: {self.state['status']}. Skipping TaskAgent actions.", level="DEBUG")
             return
+        self.current_skill_action_registry = skill_action_registry # Store the dynamic registry
 
         if 'pending_sequence_state' in self.state and self.state['pending_sequence_state']:
             pending_seq_info = self.state['pending_sequence_state']
@@ -974,6 +992,11 @@ class TaskAgent(BaseAgent):
         outcome = result.get("outcome", "unknown_outcome")
         details = result.get("details", {})
 
+        # Standard logging for all capability executions
+        log_data_action = {"tick": current_tick, "action": executed_capability, "outcome": outcome, "reward": reward, "details": copy.deepcopy(details)}
+        self.memory.log_tick(log_data_action)
+        log(f"[{self.name}] _update_state_after_action: Logged action '{executed_capability}', Outcome: '{outcome}', Reward: {reward}. Memory size: {len(self.memory.get_log())}", level="DEBUG")
+
         if executed_capability == "sequence_executor_v1" and outcome == "sequence_paused_waiting_for_sync_step":
             self.state['pending_sequence_state'] = details 
             log(f"[{self.name}] Action '{executed_capability}' outcome: {outcome}. Sequence paused, state stored.", level="INFO")
@@ -983,10 +1006,90 @@ class TaskAgent(BaseAgent):
                 "reward": 0.0, 
                 "details": {"message": "Sequence paused, awaiting sync step resolution."}
             }
-            log(f"[{self.name}] _update_state_after_action: Memory size before log_tick for PAUSED '{executed_capability}': {len(self.memory.get_log())}", level="DEBUG")
-            self.memory.log_tick(log_data_pause_initiate)
-            log(f"[{self.name}] _update_state_after_action: Called self.memory.log_tick for PAUSED Action: '{executed_capability}', Outcome: '{outcome}'. Memory size now: {len(self.memory.get_log())}", level="DEBUG")
-            return
+            # This specific log for pause initiation is already covered by the general log_data_action above.
+            # If more specific details are needed for pause, they can be added here or to log_data_action.
+            # log(f"[{self.name}] _update_state_after_action: Memory size before log_tick for PAUSED '{executed_capability}': {len(self.memory.get_log())}", level="DEBUG")
+            # self.memory.log_tick(log_data_pause_initiate)
+            # log(f"[{self.name}] _update_state_after_action: Called self.memory.log_tick for PAUSED Action: '{executed_capability}', Outcome: '{outcome}'. Memory size now: {len(self.memory.get_log())}", level="DEBUG")
+            return # Return early as Q-value update is handled by sequence executor for sync steps
+
+        # Handle LLM operation pending state
+        if outcome == "pending_llm_interpretation" or outcome == "pending_llm_conversation":
+            request_id = details.get("request_id")
+            if request_id:
+                self.state['pending_llm_operations'][request_id] = {
+                    "capability_initiated": executed_capability,
+                    "original_rl_state": initial_rl_state,
+                    "original_cap_inputs": details.get("original_cap_inputs", {}), # Store original inputs if provided by cap
+                    "success_reward": details.get("rewards_for_resolution", {}).get("success", 1.0),
+                    "failure_reward": details.get("rewards_for_resolution", {}).get("failure", -1.0),
+                    "timeout_reward": details.get("rewards_for_resolution", {}).get("timeout", -0.5),
+                    "timeout_at_tick": current_tick + details.get("timeout_in_ticks", 20)
+                }
+                log(f"[{self.name}] LLM operation for '{executed_capability}' is PENDING. Request ID: {request_id}. State stored.", level="INFO")
+            return # Return early, Q-value update will happen when LLM response is processed
+
+        # Default Q-value update for completed (non-pending) actions
+        self._update_q_value(initial_rl_state, executed_capability, reward, self._get_rl_state_representation())
+        self.capability_performance_tracker.record_capability_execution(executed_capability, "success" in outcome.lower(), reward)
+
+        # Specific goal updates based on LLM interpretation results (if not pending)
+        if executed_capability == "interpret_goal_with_llm_v1" and outcome == "success_goal_interpreted":
+            parsed_action_details = details # Assuming 'details' contains the parsed plan/action
+            original_user_query = details.get("original_user_query", "Unknown query") # Capability should pass this back
+            if isinstance(parsed_action_details, list): # If it's a plan
+                self.set_goal({
+                    "type": "execute_llm_generated_plan",
+                    "details": {"plan_to_execute": parsed_action_details, "original_user_query": original_user_query}
+                })
+            elif parsed_action_details.get("type") == "invoke_skill":
+                self.set_goal({
+                    "type": "execute_parsed_skill_invocation",
+                    "details": parsed_action_details,
+                    "original_user_query": original_user_query
+                })
+            else:
+                log(f"[{self.name}] LLM interpretation successful but result type '{parsed_action_details.get('type')}' not directly actionable for new goal. Setting to idle. Details: {parsed_action_details}", level="WARN")
+                self.current_goal = {"type": "idle", "reason": "llm_interpretation_unhandled_type_after_success"}
+
+        elif executed_capability == "conversational_exchange_llm_v1" and outcome == "success_conversation_response":
+            # If the capability directly handles conversation history update, nothing more needed here.
+            # Goal is typically set to idle after a conversational turn.
+            self.current_goal = {"type": "idle", "reason": "conversational_exchange_llm_v1_completed"}
+
+        # If a sequence completed, set goal to idle
+        elif executed_capability == "sequence_executor_v1" and "success" in outcome:
+            log(f"[{self.name}] Sequence '{details.get('sequence_name', 'unnamed')}' completed with outcome: {outcome}. Setting goal to idle.", level="INFO")
+            self.current_goal = {"type": "idle", "reason": f"sequence_{details.get('sequence_name', 'unnamed')}_completed"}
+        elif executed_capability == "sequence_executor_v1" and "failure" in outcome:
+            log(f"[{self.name}] Sequence '{details.get('sequence_name', 'unnamed')}' failed with outcome: {outcome}. Setting goal to idle.", level="WARN")
+            self.current_goal = {"type": "idle", "reason": f"sequence_{details.get('sequence_name', 'unnamed')}_failed"}
+
+        # If the current goal was 'interpret_user_goal' and it led to a failure or non-pending outcome, reset goal.
+        if self.current_goal.get("type") == "interpret_user_goal" and executed_capability == "interpret_goal_with_llm_v1" and outcome != "pending_llm_interpretation":
+            if "success" not in outcome: # If interpretation failed
+                self.current_goal = {"type": "idle", "reason": "interpret_user_goal_failed_or_unactionable"}
+            # If successful, the goal would have been changed by the logic above.
+
+        # If the current goal was 'user_defined_goal' and it led to a conversational exchange, it's handled by _execute_conversational_goal.
+        # If it led to 'interpret_goal_with_llm_v1', the goal would have been changed to 'interpret_user_goal' or directly to execute a plan.
+        # If the goal is still 'user_defined_goal' after an action that wasn't 'interpret_goal_with_llm_v1' or 'conversational_exchange_llm_v1',
+        # and the action completed (not pending), it implies the goal might need to be reset or re-evaluated.
+        # This case should be rare if goal-driven logic correctly transitions goals.
+        if self.current_goal.get("type") == "user_defined_goal" and \
+           executed_capability not in ["interpret_goal_with_llm_v1", "conversational_exchange_llm_v1"] and \
+           "pending" not in outcome:
+            log(f"[{self.name}] Action '{executed_capability}' completed for 'user_defined_goal', but goal was not transitioned. Setting to idle.", level="DEBUG")
+            self.current_goal = {"type": "idle", "reason": "user_defined_goal_action_completed_no_transition"}
+
+
+    def _update_q_value(self, state_tuple: tuple, action: str, reward: float, next_state_tuple: tuple):
+        """Helper to call RL system's Q-value update."""
+        if self.rl_system:
+            available_next_actions = self.available_capabilities()
+            self.rl_system.update_q_value(state_tuple, action, reward, next_state_tuple, available_next_actions, self.name)
+        else:
+            log(f"[{self.name}] Attempted to update Q-value, but no RL system found.", level="TRACE")
 
     def _execute_conversational_goal(self, goal_description: str, context: 'ContextManager', knowledge: 'KnowledgeBase', all_agent_names_in_system: List[str]):
         """Helper method to execute the conversational exchange capability directly."""

@@ -7,6 +7,9 @@ and the specific actions/commands those capabilities can perform.
 This is used by TaskAgents (via invoke_skill_agent_v1 and find_best_skill_agent_for_action)
 to discover which SkillAgent can handle a particular requested action.
 
+DEPRECATION NOTE: This static mapping is being phased out for TaskAgent's internal skill discovery.
+TaskAgents will rely on a dynamic registry provided by MetaAgent.
+However, this structure might still be useful for other components or for bootstrapping.
 The keys are the primary capability names (e.g., "maths_ops_v1", "data_analysis_ops_v1")
 that SkillAgents are initialized with (often derived from their skill_tool's class name).
 The values are lists of action strings that the skill can perform.

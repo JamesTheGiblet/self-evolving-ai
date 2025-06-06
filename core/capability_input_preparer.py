@@ -1,18 +1,18 @@
 # core/capability_input_preparer.py
 
 import random
-from typing import Dict, List, Any, TYPE_CHECKING
+from typing import Dict, List, Any, TYPE_CHECKING, Optional
 from utils.logger import log
 
 if TYPE_CHECKING:
     from core.agent_base import BaseAgent
     from core.context_manager import ContextManager
     from memory.knowledge_base import KnowledgeBase
-    from core.skill_definitions import SKILL_CAPABILITY_MAPPING # Type hint
+    # from core.skill_definitions import SKILL_CAPABILITY_MAPPING # No longer needed here
 
 class CapabilityInputPreparer:
-    def __init__(self, skill_capability_mapping: Dict[str, List[str]]):
-        self.SKILL_CAPABILITY_MAPPING = skill_capability_mapping
+    def __init__(self, skill_capability_mapping: Optional[Dict[str, List[str]]] = None): # Made optional
+        # self.SKILL_CAPABILITY_MAPPING = skill_capability_mapping # No longer directly used for input prep logic
         self.globally_preferable_skill_actions = [
             "maths_operation", "log_summary", "complexity_analysis", # Changed "complexity"
             "web_operation", "file_operation", "api_call" # to "complexity_analysis"

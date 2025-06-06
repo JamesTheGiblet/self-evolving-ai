@@ -7,7 +7,7 @@ from core.skill_agent import SkillAgent
 from core.task_router import TaskRouter
 from memory.knowledge_base import KnowledgeBase
 from engine.communication_bus import CommunicationBus
-from utils.logger import log
+from utils.logger import log # Explicitly import log
 from core.task_agent import TaskAgent # Import TaskAgent for instantiation
 from utils import local_llm_connector
 import config
@@ -63,6 +63,10 @@ class MetaAgent:
 
         self.task_router: Optional['TaskRouter'] = None
         log(f"MetaAgent initialized. Initial skill agents: {len(self.skill_agents)}. Default skill configs by lineage: {len(self.default_skill_configs_by_lineage)}.", level="INFO")
+
+        # Dynamic registry for skill actions -> list of agent names providing that action
+        self.skill_action_registry: Dict[str, List[str]] = {}
+        self._update_skill_action_registry() # Initial population
 
     def set_task_router(self, task_router: 'TaskRouter'):
         self.task_router = task_router
@@ -130,10 +134,8 @@ class MetaAgent:
         # In a real system, this response would be communicated back or used to drive further actions.
 
     def run_agents(self):
-        """
-        Modified to include processing MetaAgent's own messages.
-        Runs the operational cycle for all managed agents (Task and Skill).
-        """
+        """Runs the operational cycle for all managed agents (Task and Skill)."""
+        self._update_skill_action_registry() # Update the registry based on current skill agents
         self._process_meta_agent_messages() # Process messages for MetaAgent actions
 
         current_tick = self.context.get_tick()
@@ -166,7 +168,8 @@ class MetaAgent:
                     context=self.context, 
                     knowledge=self.knowledge, 
                     all_agent_names_in_system=all_agent_names,
-                    agent_info_map=agent_info_map
+                    agent_info_map=agent_info_map,
+                    skill_action_registry=self.skill_action_registry # Pass the dynamic registry
                 )
             except Exception as e:
                 log(f"Error running TaskAgent {task_agent.name}: {e}", level="ERROR", exc_info=True)
@@ -276,6 +279,7 @@ class MetaAgent:
                 log(f"[{self.name}] Updated TaskRouter with new temporary agent: {new_agent_instance.name}", level="DEBUG")
             else:
                 log(f"[{self.name}] TaskRouter not updated with new temporary agent '{new_agent_instance.name}' (TaskRouter missing 'add_skill_agent' method or not set).", level="DEBUG")
+            # self._update_skill_action_registry() # Registry will be updated at the start of the next run_agents cycle
             return True
         else:
             log(f"[{self.name}] Failed to provision temporary SkillAgent for lineage '{lineage_id}'. add_agent_from_config returned None.", level="ERROR")
@@ -401,6 +405,7 @@ class MetaAgent:
                 )
                 self.skill_agents.append(skill_agent)
                 self._update_combined_agents_list()
+                # self._update_skill_action_registry() # Registry will be updated at the start of the next run_agents cycle
                 log(f"[{self.name}] Successfully added SkillAgent: {agent_name} of lineage '{lineage_id}'.", level="INFO")
                 return skill_agent
             except Exception as e:
@@ -419,3 +424,26 @@ class MetaAgent:
         agent_names = [agent.name for agent in self.task_agents if hasattr(agent, 'name')]
         agent_names.extend([agent.name for agent in self.skill_agents if hasattr(agent, 'name')])
         return agent_names
+
+    def _update_skill_action_registry(self):
+        """
+        Rebuilds the skill_action_registry based on the current active SkillAgents
+        and the capabilities their skill_tools offer.
+        """
+        self.skill_action_registry.clear()
+        for skill_agent_instance in self.skill_agents:
+            if hasattr(skill_agent_instance, 'skill_tool') and skill_agent_instance.skill_tool:
+                tool = skill_agent_instance.skill_tool
+                if hasattr(tool, 'get_capabilities') and callable(tool.get_capabilities):
+                    try:
+                        tool_capabilities = tool.get_capabilities()
+                        # tool_capabilities is expected to be like:
+                        # {"skill_name": "MathsTool", "commands": {"add": {...}, "subtract": {...}}}
+                        for command_name in tool_capabilities.get("commands", {}).keys():
+                            if command_name not in self.skill_action_registry:
+                                self.skill_action_registry[command_name] = []
+                            if skill_agent_instance.name not in self.skill_action_registry[command_name]:
+                                self.skill_action_registry[command_name].append(skill_agent_instance.name)
+                    except Exception as e:
+                        log(f"[{self.name}] Error getting/processing capabilities from skill_tool {type(tool)} for agent {skill_agent_instance.name}: {e}", level="ERROR")
+        log(f"[{self.name}] Skill action registry updated. {len(self.skill_action_registry)} actions mapped. Example action 'add' providers: {self.skill_action_registry.get('add', [])}", level="DEBUG")
