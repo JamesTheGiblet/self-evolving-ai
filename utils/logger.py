@@ -47,9 +47,9 @@ def log(message: str, level: str = "INFO", source: Optional[str] = None, **kwarg
     level_upper = level.upper()
     target_file_path = None
 
-    if level_upper in ["ERROR", "CRITICAL"]:
+    if level_upper in ["WARNING", "ERROR", "CRITICAL"]:
         target_file_path = FAULT_LOG_FILE
-    elif level_upper in ["INFO", "DEBUG", "WARNING", "TRACE"]: # TRACE and WARNING go to simulation.log
+    elif level_upper in ["INFO", "DEBUG", "TRACE"]:
         target_file_path = SIMULATION_LOG_FILE
     # Other custom levels, if any, won't be logged to these specific files by default.
 
