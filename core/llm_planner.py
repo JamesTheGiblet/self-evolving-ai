@@ -1,7 +1,7 @@
 # c:\Users\gilbe\Desktop\self-evolving-ai\core\llm_planner.py
 
 import json
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable # Added Callable
 from utils.logger import log
 import config
 from utils import local_llm_connector
@@ -110,6 +110,50 @@ class LLMPlanner:
         log(f"[LLMPlanner] SIMULATING: No specific pre-defined plan for query: '{user_query}' with model '{self.model_name}'. Returning None.")
         return None
 
+    def _get_simulated_text(self, prompt: str, agent_capabilities: Optional[List[str]] = None) -> Optional[str]: # Added agent_capabilities to match signature, though not used
+        """Generates simulated text. Matches signature for simulated_content_generator."""
+        log(f"[LLMPlanner] SIMULATING text generation for prompt: '{prompt[:100]}...'")
+        if "Suggest a new, concise, and meaningful name" in prompt:
+            return "New Suggested Name: SimulatedEvoMind\nNew Suggested Purpose: To simulate evolution and learning."
+        else:
+            return f"Simulated text response to: {prompt[:100]}"
+
+    def _dispatch_llm_call(
+        self,
+        prompt_messages_generator: Callable[[str, Optional[List[str]]], List[Dict[str, str]]],
+        simulated_content_generator: Callable[[str, Optional[List[str]]], Optional[Any]],
+        is_plan_generation: bool,
+        user_query_or_prompt: str,
+        agent_capabilities: Optional[List[str]] = None,
+        **llm_kwargs: Any
+    ) -> Optional[str]:
+        """
+        Dispatches the call to either a simulated content generator (staged via local_llm_connector)
+        or the real async LLM connector.
+
+        Args:
+            prompt_messages_generator: Callable that returns the list of prompt messages for the real LLM.
+            simulated_content_generator: Callable that generates the simulated plan or text.
+            is_plan_generation: True if generating a plan, False for general text.
+            user_query_or_prompt: The original user query (for plans) or prompt (for text).
+            agent_capabilities: Agent capabilities, used by prompt_messages_generator and plan simulation.
+            **llm_kwargs: Keyword arguments for the real LLM call (e.g., max_tokens, temperature).
+
+        Returns:
+            The request_id string from local_llm_connector, or None on error.
+        """
+        if self.model_name.startswith("simulated_"):
+            log(f"[LLMPlanner] Using SIMULATED LLM call for model '{self.model_name}'", level="DEBUG")
+            simulated_content = simulated_content_generator(user_query_or_prompt, agent_capabilities)
+            error_msg = "Simulated plan generation failed" if is_plan_generation else "Simulated text generation failed"
+            return local_llm_connector.stage_simulated_llm_response(simulated_content, is_plan=is_plan_generation, error=error_msg if simulated_content is None else None)
+        else:
+            log(f"[LLMPlanner] Using REAL ASYNC LLM call for model '{self.model_name}' for '{user_query_or_prompt[:50]}'", level="DEBUG")
+            prompt_messages = prompt_messages_generator(user_query_or_prompt, agent_capabilities)
+            return local_llm_connector.call_local_llm_api_async(
+                prompt_messages=prompt_messages, model_name=self.model_name, **llm_kwargs
+            )
+
     def generate_plan(self, user_query: str, agent_capabilities: List[str], agent_state: Optional[Dict] = None) -> Optional[Any]:
         """
         Generates a plan based on the user query and agent capabilities using the local LLM.
@@ -117,26 +161,16 @@ class LLMPlanner:
         MODIFIED: Now always returns a request_id. For simulated plans, it stores the plan
         internally in local_llm_connector for async-style retrieval.
         """
-        if self.model_name.startswith("simulated_"):
-            simulated_plan = self._get_simulated_plan(user_query, agent_capabilities)
-            if simulated_plan:
-                # Use a special function in local_llm_connector to "stage" this simulated plan
-                return local_llm_connector.stage_simulated_llm_response(simulated_plan, is_plan=True)
-            else:
-                return local_llm_connector.stage_simulated_llm_response(None, is_plan=True, error="Simulated plan generation failed")
-        
-        prompt_messages = self._construct_prompt_messages(user_query, agent_capabilities)
-
-        log(f"[LLMPlanner] Sending request to LOCAL LLM ({self.model_name}) for query: '{user_query}'")
+        llm_kwargs = {"temperature": 0.2}
         try:
-            request_id = local_llm_connector.call_local_llm_api_async(
-                prompt_messages=prompt_messages,
-                model_name=self.model_name,
-                temperature=0.2,
+            return self._dispatch_llm_call(
+                prompt_messages_generator=self._construct_prompt_messages,
+                simulated_content_generator=self._get_simulated_plan,
+                is_plan_generation=True,
+                user_query_or_prompt=user_query,
+                agent_capabilities=agent_capabilities,
+                **llm_kwargs
             )
-            log(f"[LLMPlanner] Dispatched ASYNC plan generation request to LOCAL LLM ({self.model_name}). Request ID: {request_id}", level="INFO")
-            return request_id
-
         except Exception as e:
             log(f"[LLMPlanner] Error during local LLM plan generation: {e}", level="ERROR", exc_info=True)
             return None
@@ -147,34 +181,23 @@ class LLMPlanner:
         MODIFIED: Now always returns a request_id. For simulated text, it stores the text
         internally in local_llm_connector for async-style retrieval.
         """
-        if self.model_name.startswith("simulated_"):
-            log(f"[LLMPlanner] SIMULATING text generation for prompt: '{prompt[:100]}...'")
-            simulated_text = None
-            if "Suggest a new, concise, and meaningful name" in prompt:
-                simulated_text = "New Suggested Name: SimulatedEvoMind\nNew Suggested Purpose: To simulate evolution and learning."
-            else:
-                simulated_text = f"Simulated text response to: {prompt[:100]}"
-            
-            return local_llm_connector.stage_simulated_llm_response(simulated_text, is_plan=False)
+        llm_kwargs = {"max_tokens": max_tokens, "temperature": temperature}
 
-
-        log(f"[LLMPlanner] Sending text generation request to LOCAL LLM ({self.model_name}) for prompt: '{prompt[:100]}...'")
-        
-        prompt_messages = [
-            {"role": "system", "content": "You are a helpful AI assistant."},
-            {"role": "user", "content": prompt}
-        ]
-        
+        def _text_prompt_messages_generator(text_prompt: str, _agent_capabilities: Optional[List[str]]) -> List[Dict[str, str]]:
+            # _agent_capabilities is ignored for general text generation
+            return [
+                {"role": "system", "content": "You are a helpful AI assistant."},
+                {"role": "user", "content": text_prompt}
+            ]
         try:
-            request_id = local_llm_connector.call_local_llm_api_async(
-                prompt_messages=prompt_messages,
-                model_name=self.model_name,
-                max_tokens=max_tokens,
-                temperature=temperature,
+            return self._dispatch_llm_call(
+                prompt_messages_generator=_text_prompt_messages_generator,
+                simulated_content_generator=self._get_simulated_text,
+                is_plan_generation=False,
+                user_query_or_prompt=prompt,
+                # agent_capabilities not needed for general text generation by _get_simulated_text or _text_prompt_messages_generator
+                **llm_kwargs
             )
-            log(f"[LLMPlanner] Dispatched ASYNC text generation request to LOCAL LLM ({self.model_name}). Request ID: {request_id}", level="INFO")
-            return request_id
-            
         except Exception as e:
             log(f"[LLMPlanner] Error during local LLM text generation: {e}", level="ERROR", exc_info=True)
             return None
