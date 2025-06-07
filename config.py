@@ -51,3 +51,8 @@ IDENTITY_REFLECTION_INTERVAL_TICKS = 100 # How many ticks between identity refle
 PROJECT_ROOT_PATH = os.path.dirname(os.path.abspath(__file__)) # Base path for logs, etc.
 KB_RECENCY_DECAY_RATE_PER_DAY = 0.1  # Daily decay rate for the recency effect (0.0 to 1.0)
 KB_ACCESS_COUNT_CAP_FOR_RELEVANCE = 10 # Max access count to consider for relevance bonus
+
+# Triangulated Insight Auto-Trigger Defaults (can be overridden in agent's capability_params)
+DEFAULT_AUTO_DIAGNOSIS_ENABLED = True
+DEFAULT_MIN_ATTEMPTS_FOR_FAILURE_CHECK = 10 # Min attempts of a capability before checking its failure rate
+DEFAULT_FAILURE_RATE_THRESHOLD_FOR_INSIGHT = 0.60 # e.g., 60% failure rate

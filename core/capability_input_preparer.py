@@ -3,6 +3,7 @@
 import random
 from typing import Dict, List, Any, TYPE_CHECKING, Optional
 from utils.logger import log
+import time # For timestamping symptom_data
 
 if TYPE_CHECKING:
     from core.agent_base import BaseAgent

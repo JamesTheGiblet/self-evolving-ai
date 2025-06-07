@@ -1,6 +1,7 @@
 # core/capability_registry.py
 
 import config # For default LLM model
+import config as global_config # Import the main config file for global settings
 
 CAPABILITY_REGISTRY = {
     "communication_broadcast_v1": {
@@ -105,7 +106,7 @@ CAPABILITY_REGISTRY = {
             "symptom_key_in_state": "last_reported_symptom", # if symptom_source is agent_state
             "default_symptom_if_none": {
                 "symptom_id": "default_symptom_000", "timestamp": 0.0, "tick": 0,
-                "type": "generic_observation", "severity": "low",
+                    "type": "generic_observation", "severity": "low", # Ensure 'type' is present
                 "source_agent_id": "system", "source_agent_name": "SystemDefault",
                 "details": {"description": "No specific symptom provided or found in state."},
                 "related_data_refs": []
@@ -115,7 +116,10 @@ CAPABILITY_REGISTRY = {
             ],
             "insight_rules": [ # Default configuration for insight generation rules
                 # Example: {"name": "service_failure_correlation", "conditions": [...], "insight_text": "..."}
-            ]
+            ],
+            "auto_trigger_on_high_failure": global_config.DEFAULT_AUTO_DIAGNOSIS_ENABLED,
+            "min_attempts_for_failure_check": global_config.DEFAULT_MIN_ATTEMPTS_FOR_FAILURE_CHECK,
+            "failure_rate_threshold_for_insight": global_config.DEFAULT_FAILURE_RATE_THRESHOLD_FOR_INSIGHT,
         },
         "input_schema": {"type": "object", "properties": {"primary_symptom_details": {"type": "object"}, "additional_context_data": {"type": "array"}}},
         "output_schema": {"type": "object", "properties": {"outcome": {"type": "string"}, "best_insight": {"type": "object"}, "all_insights": {"type": "array"}}}

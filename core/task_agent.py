@@ -1158,6 +1158,16 @@ class TaskAgent(BaseAgent):
                 log(f"[{self.name}] Goal 'interpret_user_goal' requires 'interpret_goal_with_llm_v1' capability, which is missing. Cannot execute.", level="ERROR")
                 self.current_goal = {"type": "idle", "reason": "missing_interpret_capability_for_goal"}
 
+        elif not chosen_capability_name and self.current_goal.get("type") == "self_diagnose_failures":
+            if self.has_capability("triangulated_insight_v1"):
+                log(f"[{self.name}] Goal-driven choice: Goal is 'self_diagnose_failures'. Selecting 'triangulated_insight_v1'. Details: {self.current_goal.get('details')}", level="INFO")
+                chosen_capability_name = "triangulated_insight_v1"
+                action_selection_reason = "goal_driven_self_diagnose_failures"
+                # cap_inputs_for_execution will be prepared by input_preparer
+            else:
+                log(f"[{self.name}] Goal 'self_diagnose_failures' requires 'triangulated_insight_v1' capability, which is missing. Cannot execute.", level="ERROR")
+                self.current_goal = {"type": "idle", "reason": "missing_insight_capability_for_self_diagnosis"}
+
         elif not chosen_capability_name and "pending_skill_invocation" in self.state and self.state["pending_skill_invocation"]:
             pending_skill_details = self.state.pop("pending_skill_invocation")
             
@@ -1366,11 +1376,43 @@ class TaskAgent(BaseAgent):
         # If the goal is still 'user_defined_goal' after an action that wasn't 'interpret_goal_with_llm_v1' or 'conversational_exchange_llm_v1',
         # and the action completed (not pending), it implies the goal might need to be reset or re-evaluated.
         # This case should be rare if goal-driven logic correctly transitions goals.
+
+        # --- Automated Root Cause Analysis Trigger ---
+        # Check if this feature is enabled for the agent and if the executed capability is not the insight itself
+        if executed_capability != "triangulated_insight_v1":
+            insight_cap_params = self.capability_params.get("triangulated_insight_v1", {})
+            enable_auto_diagnosis = insight_cap_params.get("auto_trigger_on_high_failure", config.DEFAULT_AUTO_DIAGNOSIS_ENABLED)
+            min_attempts_for_check = insight_cap_params.get("min_attempts_for_failure_check", config.DEFAULT_MIN_ATTEMPTS_FOR_FAILURE_CHECK)
+            failure_threshold = insight_cap_params.get("failure_rate_threshold_for_insight", config.DEFAULT_FAILURE_RATE_THRESHOLD_FOR_INSIGHT)
+
+            if self.has_capability("triangulated_insight_v1") and enable_auto_diagnosis:
+                cap_stats = self.capability_performance_tracker.get_stats_for_capability(executed_capability)
+                if cap_stats and cap_stats["attempts"] >= min_attempts_for_check:
+                    current_failure_rate = 1.0 - (cap_stats["successes"] / cap_stats["attempts"]) if cap_stats["attempts"] > 0 else 0.0
+                    
+                    is_already_diagnosing_this = (
+                        self.current_goal.get("type") == "self_diagnose_failures" and
+                        self.current_goal.get("details", {}).get("failing_capability") == executed_capability
+                    )
+
+                    if current_failure_rate >= failure_threshold and not is_already_diagnosing_this:
+                        log(f"[{self.name}] High failure rate ({current_failure_rate:.2f}) for capability '{executed_capability}' after {cap_stats['attempts']} attempts. Triggering self-diagnosis.", level="WARNING")
+                        self.set_goal({
+                            "type": "self_diagnose_failures",
+                            "details": {
+                                "failing_capability": executed_capability,
+                                "current_failure_rate": current_failure_rate,
+                                "attempts": cap_stats["attempts"],
+                                "successes": cap_stats["successes"]
+                            }
+                        })
+
         if self.current_goal.get("type") == "user_defined_goal" and \
            executed_capability not in ["interpret_goal_with_llm_v1", "conversational_exchange_llm_v1"] and \
            "pending" not in outcome:
             log(f"[{self.name}] Action '{executed_capability}' completed for 'user_defined_goal', but goal was not transitioned. Setting to idle.", level="DEBUG")
             self.current_goal = {"type": "idle", "reason": "user_defined_goal_action_completed_no_transition"}
+            chosen_capability_name = "conversational_exchange_llm_v1" # Mark as handled this tick
 
 
     def _update_q_value(self, state_tuple: tuple, action: str, reward: float, next_state_tuple: tuple):
