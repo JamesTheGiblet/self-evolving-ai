@@ -5,6 +5,7 @@ import threading
 import logging
 import time
 import _tkinter
+from gui_agent_detail_view import AgentDetailWindow
 from utils.logger import log as gui_log
 import config
 
@@ -41,6 +42,7 @@ class SimulationGUI(ctk.CTk):
         self.selected_agent_name = None
         self.simulation_thread = None
         self.simulation_running = False
+        self.agent_detail_window = None # To store the reference to the detail window
         self.stop_simulation_event = threading.Event()
 
         # Configure grid layout
@@ -74,14 +76,16 @@ class SimulationGUI(ctk.CTk):
         self.kb_size_label.grid(row=content_start_row + 3, column=0, pady=2, padx=10, sticky="w")
 
         # Import visualization frames
-        from gui_visualizations import AgentMapFrame, MemoryStreamFrame, KnowledgeInjectionFrame, KnowledgeQueryFrame, AgentSummaryFrame, SystemMetricsChartFrame
+        from gui_visualizations import (AgentMapFrame, MemoryStreamFrame, KnowledgeInjectionFrame,
+                                        KnowledgeQueryFrame, AgentSummaryFrame, SystemMetricsChartFrame)
+        from gui_agent_detail_view import AgentDetailWindow # Import the new detail window
 
         # System metrics chart
         self.system_metrics_chart_frame = SystemMetricsChartFrame(self, context_manager=self.context_manager, mutation_engine=self.mutation_engine)
         self.system_metrics_chart_frame.grid(row=content_start_row, column=1, rowspan=4, pady=(0,5), padx=10, sticky="nsew")
 
         # Agent map and memory stream
-        self.agent_map_frame = AgentMapFrame(self, meta_agent=self.meta_agent)
+        self.agent_map_frame = AgentMapFrame(self, meta_agent=self.meta_agent, on_agent_click_callback=self.show_agent_detail)
         self.memory_stream_frame = MemoryStreamFrame(self, knowledge_base=self.knowledge_base, context_manager=self.context_manager)
         self.memory_stream_frame.grid(row=content_start_row + 4, column=1, rowspan=6, pady=(5,10), padx=10, sticky="nsew")
 
@@ -218,6 +222,30 @@ class SimulationGUI(ctk.CTk):
         self.selected_agent_name = agent_name
         gui_log(f"Selected agent for feedback: {self.selected_agent_name}")
         self.feedback_status_label.configure(text=f"Selected: {self.selected_agent_name}")
+
+    def show_agent_detail(self, agent_name: str):
+        """Shows a detailed view of the specified agent."""
+        if not self.meta_agent:
+            gui_log("Cannot show agent detail: MetaAgent not available.", level="WARN")
+            return
+
+        selected_agent = None
+        # Iterate through the live list of agents from meta_agent
+        for agent in self.meta_agent.agents: # Make sure this is the correct list of all agents
+            if getattr(agent, 'name', None) == agent_name:
+                selected_agent = agent
+                break
+
+        if not selected_agent:
+            gui_log(f"Agent '{agent_name}' not found for detail view.", level="WARN")
+            return
+
+        if self.agent_detail_window is None or not self.agent_detail_window.winfo_exists():
+            self.agent_detail_window = AgentDetailWindow(self, agent=selected_agent)
+        else:
+            self.agent_detail_window.update_details(selected_agent) # Update existing window
+        self.agent_detail_window.deiconify() # Ensure it's visible if it was iconified
+        self.agent_detail_window.lift()      # Bring to front
 
     def update_ui_elements(self):
         """Updates UI elements with current simulation data."""

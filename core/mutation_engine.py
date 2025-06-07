@@ -9,6 +9,7 @@ from engine.fitness_engine import FitnessEngine
 from utils.logger import log
 from core.capability_registry import CAPABILITY_REGISTRY
 import config as global_config # Import the main config file
+from agents.code_gen_agent import CodeGenAgent # For type hinting
 if TYPE_CHECKING:
     from core.meta_agent import MetaAgent
     from core.task_agent import TaskAgent
@@ -61,7 +62,16 @@ class MutationEngine:
         self.DEFAULT_SKILL_LINEAGE_BASES = list(set(
             cfg.get('lineage_id', 'unknown_lineage') # Default to 'unknown_lineage' if somehow missing
             for cfg in self.meta_agent.default_skill_configs_by_lineage.values() if cfg and cfg.get('lineage_id')))
+        self.code_gen_agent: Optional[CodeGenAgent] = None
         log("[MutationEngine] Initialized.")
+
+    def set_code_gen_agent(self, code_gen_agent_instance: CodeGenAgent):
+        """Sets the CodeGenAgent instance for the MutationEngine."""
+        self.code_gen_agent = code_gen_agent_instance
+        if self.code_gen_agent:
+            log("[MutationEngine] CodeGenAgent instance has been set.", level="INFO")
+        else:
+            log("[MutationEngine] CodeGenAgent instance set to None.", level="WARN")
 
     def should_mutate(self, fitness: float) -> bool:
         return random.random() < (1.0 - fitness)
@@ -428,6 +438,42 @@ class MutationEngine:
         else:
             log(f"[MutationEngine] Agent '{agent_config.get('name')}' has no behavior_mode in config. Cannot update performance.", level="WARNING")
 
+    def _attempt_code_generation_for_evolution(self, base_agent_config: Dict[str, Any]):
+        """
+        Attempts to use CodeGenAgent to generate a new or evolved skill.
+        """
+        if not self.code_gen_agent:
+            log("[MutationEngine] CodeGenAgent not available, skipping code generation attempt.", level="DEBUG")
+            return
+
+        agent_type = base_agent_config.get("agent_type", "unknown")
+        original_description = base_agent_config.get("description", f"A {agent_type} agent with capabilities: {base_agent_config.get('capabilities', [])}")
+        
+        # Simple example: try to add a new related feature
+        new_feature_ideas = ["perform advanced statistical calculations", "integrate with a calendar API", "parse complex data formats", "generate creative text summaries", "control a virtual robot arm"]
+        added_feature_request = random.choice(new_feature_ideas)
+
+        prompt_description = (
+            f"Generate Python code for a new standalone skill module. This skill should be an evolution of, or inspired by, "
+            f"a concept described as: '{original_description}'.\n"
+            f"The key new functionality to incorporate is: '{added_feature_request}'.\n"
+            f"The skill should be encapsulated in one or more Python functions or a class."
+        )
+        
+        guidelines = (
+            "The generated Python code should be functional and include docstrings. "
+            "If it's a class, it should have an `execute(command_string)` method. "
+            "If it's a function, ensure it's clearly named based on its primary new capability. "
+            "Only output the raw Python code."
+        )
+
+        log(f"[MutationEngine] Attempting code generation for evolved skill based on '{base_agent_config.get('name')}'. New feature: '{added_feature_request}'", level="INFO")
+        generated_code = self.code_gen_agent.write_new_capability(prompt_description, guidelines)
+
+        log(f"[MutationEngine] CodeGenAgent response for evolved skill (based on '{base_agent_config.get('name')}'):\n{generated_code}", level="INFO" if generated_code else "WARN")
+        # TODO: Next steps would be to validate, test, and integrate this generated_code.
+        # For now, we just log it.
+
     def run_assessment_and_mutation(self):
         current_tick = self.context.get_tick()
         log(f"MutationEngine: Starting assessment and mutation cycle (Tick {current_tick})...")
@@ -502,6 +548,9 @@ class MutationEngine:
             for selected_config in selected_task_configs_for_mutation:
                 mutated_config = self.mutate_config(selected_config, "task", all_current_agent_names) # Pass agent_type
                 new_task_agent_configs.append(mutated_config)
+                # Attempt radical code generation based on the mutated config
+                if random.random() < 0.1: # 10% chance
+                    self._attempt_code_generation_for_evolution(mutated_config)
                 log(f"  - Agent '{selected_config['name']}' selected and mutated for next generation.")
         else:
             log("MutationEngine: No Task Agents to mutate.", level="INFO")
@@ -537,6 +586,9 @@ class MutationEngine:
             for selected_config in unique_selected_skill_configs:
                 mutated_config = self.mutate_config(selected_config, "skill", all_current_agent_names) # Pass agent_type
                 new_skill_agent_configs.append(mutated_config)
+                # Attempt radical code generation based on the mutated config
+                if random.random() < 0.1: # 10% chance
+                    self._attempt_code_generation_for_evolution(mutated_config)
                 log(f"  - Skill Agent '{selected_config['name']}' selected and mutated for next generation.")
         else:
             log("MutationEngine: No Skill Agents assessed or selected for mutation based on fitness.", level="INFO")

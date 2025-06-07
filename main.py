@@ -18,6 +18,8 @@ from gui import SimulationGUI
 from utils import local_llm_connector
 import json
 from utils.logger import log
+from urllib.parse import urlparse # For parsing Ollama host from URL
+from agents.code_gen_agent import LLMInterface, CodeGenAgent # Import CodeGen components
 import config
 from core.skill_loader import load_skills_dynamically
 
@@ -74,6 +76,26 @@ def main():
         context_manager=context_manager,
     )
 
+    # Initialize LLMInterface and CodeGenAgent
+    # Extract Ollama host from the base URL in config
+    ollama_host = None
+    if config.LOCAL_LLM_API_BASE_URL:
+        try:
+            parsed_url = urlparse(config.LOCAL_LLM_API_BASE_URL)
+            if parsed_url.scheme and parsed_url.netloc:
+                ollama_host = f"{parsed_url.scheme}://{parsed_url.netloc}"
+        except Exception as e:
+            log(f"Could not parse LOCAL_LLM_API_BASE_URL for Ollama host: {e}. Using default.", level="WARN")
+
+    log(f"Initializing LLMInterface for CodeGenAgent with model: {config.LOCAL_LLM_DEFAULT_MODEL} and host: {ollama_host or 'default'}")
+    code_gen_llm_interface = LLMInterface(
+        model_name=config.LOCAL_LLM_DEFAULT_MODEL,
+        # host=ollama_host # Removed: LLMInterface.__init__ does not accept 'host'.
+                           # It likely configures the host internally, possibly using config.LOCAL_LLM_API_BASE_URL.
+    )
+    code_gen_agent_instance = CodeGenAgent(llm_interface=code_gen_llm_interface)
+    log("[Main] CodeGenAgent instance created.", level="INFO")
+
     # Load skill agents dynamically from the 'skills' directory
     skills_dir = os.path.join(PROJECT_ROOT, "skills")
     log(f"Attempting to load skills from: {skills_dir}", level="INFO")
@@ -82,7 +104,8 @@ def main():
         knowledge_base_instance=knowledge_base,
         context_manager_instance=context_manager,
         communication_bus_instance=communication_bus,
-        identity_engine_instance=identity_engine_instance
+        identity_engine_instance=identity_engine_instance,
+        code_gen_agent_instance=code_gen_agent_instance # Pass it here
     )
     log(f"Dynamically initialized {len(dynamic_skill_agents)} skill agents.", level="INFO")
 
@@ -137,6 +160,7 @@ def main():
         knowledge_base_instance=knowledge_base,
         context_manager_instance=context_manager,
     )
+    log("[Main] MutationEngine initialized.", level="INFO")
 
     # Set IdentityEngine reference on ContextManager
     if hasattr(context_manager, 'set_identity_engine'):
@@ -145,6 +169,11 @@ def main():
     else:
         context_manager.identity_engine = identity_engine_instance
         log("[Main] IdentityEngine directly set on ContextManager (fallback).", level="WARN")
+
+    # Pass the code_gen_agent_instance to the MutationEngine
+    if hasattr(mutation_engine, 'set_code_gen_agent'):
+        mutation_engine.set_code_gen_agent(code_gen_agent_instance)
+        log("[Main] CodeGenAgent instance set on MutationEngine.", level="INFO")
 
     log("SYSTEM BOOTING...", level="INFO")
 

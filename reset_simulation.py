@@ -107,6 +107,13 @@ def clear_agent_data_directory(root_dir):
     agent_data_path = os.path.join(root_dir, "agent_data")
     clear_directory_contents(agent_data_path, "agent_data")
 
+def clear_generated_capabilities_directory(root_dir):
+    """
+    Clear all contents of the 'generated_capabilities' directory.
+    """
+    generated_capabilities_path = os.path.join(root_dir, "generated_capabilities")
+    clear_directory_contents(generated_capabilities_path, "generated_capabilities")
+
 if __name__ == "__main__":
     # Print the project root directory for reference
     print(f"Project Root: {PROJECT_ROOT}")
@@ -128,4 +135,7 @@ if __name__ == "__main__":
 
     print("\n--- Clearing 'agent_data' directory (other contents) ---")
     clear_agent_data_directory(PROJECT_ROOT)
+
+    print("\n--- Clearing 'generated_capabilities' directory ---")
+    clear_generated_capabilities_directory(PROJECT_ROOT)
     print("\nReset script finished.")

@@ -7,7 +7,7 @@ import importlib.util
 import inspect
 import re
 import sys
-from typing import List, Tuple, Dict, Type
+from typing import List, Tuple, Dict, Type, Optional
 
 # Assuming these are the correct paths based on your project structure
 # If skill_loader.py is in core/, and skills/ and memory/ are siblings of core/
@@ -19,6 +19,7 @@ from memory.knowledge_base import KnowledgeBase
 from core.context_manager import ContextManager
 from engine.communication_bus import CommunicationBus
 from engine.identity_engine import IdentityEngine # For type hinting
+from agents.code_gen_agent import CodeGenAgent # For type hinting
 from utils.logger import log
 
 # --- Helper Function to Generate Lineage IDs ---
@@ -50,7 +51,8 @@ def load_skills_dynamically(
     knowledge_base_instance: KnowledgeBase,
     context_manager_instance: ContextManager,
     communication_bus_instance: CommunicationBus,
-    identity_engine_instance: IdentityEngine # Added
+    identity_engine_instance: IdentityEngine, # Added
+    code_gen_agent_instance: Optional[CodeGenAgent] = None # Added for CodeGenAgent
 ) -> Tuple[List[SkillAgent], List[Dict]]:
     """
     Dynamically loads skill tools from the specified directory,
@@ -62,6 +64,7 @@ def load_skills_dynamically(
         context_manager_instance: Instance of ContextManager.
         communication_bus_instance: Instance of CommunicationBus.
         identity_engine_instance: Instance of IdentityEngine.
+        code_gen_agent_instance: Optional instance of CodeGenAgent.
 
     Returns:
         A tuple containing:
@@ -134,13 +137,42 @@ def load_skills_dynamically(
                 if skill_class_to_instantiate:
                     skill_class_name = skill_class_to_instantiate.__name__
                     log(f"Found skill class: {skill_class_name} in {module_name_from_file}.py", level="INFO")
-                    
-                    # Instantiate the skill tool with its specific dependencies
-                    tool_kwargs = skill_dependencies.get(skill_class_name, {})
-                    skill_tool_instance: BaseSkillTool = skill_class_to_instantiate(**tool_kwargs)
 
                     lineage_id = generate_lineage_id_from_skill_name(skill_class_name)
                     agent_id_for_skill = f"{lineage_id}_0" 
+                    agent_name_for_skill = agent_id_for_skill # Or a more descriptive name
+
+                    # Prepare arguments for the skill tool's constructor
+                    # This 'skill_config_for_tool' is passed as the 'skill_config' argument
+                    # to the skill tool's __init__ method (e.g., CodeGenerationSkill.__init__)
+                    skill_config_for_tool = {
+                        "name": agent_name_for_skill,
+                        "lineage_id": lineage_id,
+                        "skill_class_name": skill_class_name,
+                        # Add other skill-specific parameters here if they were defined elsewhere
+                    }
+
+                    tool_constructor_args = {
+                        "skill_config": skill_config_for_tool,
+                        "knowledge_base": knowledge_base_instance,
+                        "context_manager": context_manager_instance,
+                        "communication_bus": communication_bus_instance,
+                        "agent_name": agent_name_for_skill,
+                        "agent_id": agent_id_for_skill,
+                    }
+
+                    # Add specific dependencies from skill_dependencies
+                    tool_constructor_args.update(skill_dependencies.get(skill_class_name, {}))
+
+                    # Check if the skill tool's constructor expects 'code_gen_agent'
+                    requires_code_gen_agent_flag = False
+                    init_params = inspect.signature(skill_class_to_instantiate.__init__).parameters
+                    if 'code_gen_agent' in init_params and code_gen_agent_instance:
+                        tool_constructor_args['code_gen_agent'] = code_gen_agent_instance
+                        requires_code_gen_agent_flag = True
+                        log(f"Passing CodeGenAgent to {skill_class_name}", level="DEBUG")
+
+                    skill_tool_instance: BaseSkillTool = skill_class_to_instantiate(**tool_constructor_args)
                     
                     # The primary capability this SkillAgent offers (its "service")
                     # This should be derived from the skill tool itself, or by convention.
@@ -149,12 +181,12 @@ def load_skills_dynamically(
                     # If your skill tools have a method to declare their primary service capability, use that.
                     # Example: service_capability_name = skill_tool_instance.get_service_capability_name()
 
-
                     skill_agent_instance = SkillAgent(
                         skill_tool=skill_tool_instance,
                         context_manager=context_manager_instance,
                         knowledge_base=knowledge_base_instance,
                         communication_bus=communication_bus_instance,
+                        name=agent_name_for_skill, # Pass name explicitly
                         agent_id=agent_id_for_skill,
                         capabilities=[service_capability_name], # Agent offers this service
                         lineage_id=lineage_id,
@@ -164,13 +196,14 @@ def load_skills_dynamically(
                     loaded_skill_agents.append(skill_agent_instance)
 
                     default_config_entry = {
-                        "name": agent_id_for_skill,
+                        "name": agent_name_for_skill,
                         "agent_type": "skill",
                         "capabilities": [service_capability_name],
                         "skill_tool_class_name": skill_class_name, # Store class name for potential re-instantiation
                         "skill_module_name": qualified_module_name, # Store module for re-import if needed
                         "lineage_id": lineage_id,
                         "generation": 0,
+                        "requires_code_gen_agent": requires_code_gen_agent_flag, # Store if it needed CodeGenAgent
                         "skill_tool": skill_tool_instance, # Store the actual instance for MetaAgent's re-seeding
                     }
                     default_skill_agent_configs_list.append(default_config_entry)

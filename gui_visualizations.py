@@ -9,10 +9,12 @@ from collections import deque
 class AgentMapFrame(ctk.CTkFrame):
     """
     Displays a real-time map/list of active agents.
+    Agents are clickable to show more details.
     """
-    def __init__(self, master, meta_agent, **kwargs):
+    def __init__(self, master, meta_agent, on_agent_click_callback, **kwargs):
         super().__init__(master, **kwargs)
         self.meta_agent = meta_agent
+        self.on_agent_click_callback = on_agent_click_callback
         self.grid_columnconfigure(0, weight=1)
         self.agent_widgets = {}
 
@@ -53,10 +55,12 @@ class AgentMapFrame(ctk.CTkFrame):
             )
 
             if agent_name not in self.agent_widgets:
-                widget = ctk.CTkLabel(self.agent_list_frame, text=agent_display_text, anchor="w")
-                widget.pack(fill="x", pady=1)
+                widget = ctk.CTkButton(self.agent_list_frame, text=agent_display_text, anchor="w",
+                                       command=lambda name=agent_name_val: self.on_agent_click_callback(name))
+                widget.pack(fill="x", pady=1, padx=2)
                 self.agent_widgets[agent_name] = widget
             else:
+                # Update text for existing widget
                 self.agent_widgets[agent_name].configure(text=agent_display_text)
 
         self.agent_list_frame.update_idletasks()
