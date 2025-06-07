@@ -23,7 +23,7 @@ class AgentMapFrame(ctk.CTkFrame):
         self.label.grid(row=0, column=0, sticky="w", padx=5, pady=5)
 
         # Scrollable frame for agent list
-        self.agent_list_frame = ctk.CTkScrollableFrame(self, height=150)
+        self.agent_list_frame = ctk.CTkScrollableFrame(self, height=120) # Reduced height
         self.agent_list_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
         self.grid_rowconfigure(1, weight=1)
 
@@ -108,7 +108,7 @@ class MemoryStreamFrame(ctk.CTkFrame):
         filter_row += 1
 
         # Scrollable frame for memory events
-        self.memory_list_frame = ctk.CTkScrollableFrame(self, height=150)
+        self.memory_list_frame = ctk.CTkScrollableFrame(self, height=60) # Halved height
         self.memory_list_frame.grid(row=filter_row, column=0, sticky="nsew", padx=5, pady=5)
         self.grid_rowconfigure(filter_row, weight=1)
 
@@ -191,7 +191,7 @@ class KnowledgeInjectionFrame(ctk.CTkFrame):
         current_row += 1
 
         # Textbox for data to inject
-        self.kb_inject_data_textbox = ctk.CTkTextbox(self, height=70)
+        self.kb_inject_data_textbox = ctk.CTkTextbox(self, height=60) # Reduced height
         self.kb_inject_data_textbox.grid(row=current_row, column=0, columnspan=2, pady=5, padx=5, sticky="ew")
         current_row += 1
 
@@ -310,7 +310,7 @@ class KnowledgeQueryFrame(ctk.CTkFrame):
         current_row += 1
 
         # Results textbox
-        self.kb_query_results_textbox = ctk.CTkTextbox(self, height=100, state="disabled", wrap="word")
+        self.kb_query_results_textbox = ctk.CTkTextbox(self, height=80, state="disabled", wrap="word") # Reduced height
         self.kb_query_results_textbox.grid(row=current_row, column=0, columnspan=2, pady=5, padx=5, sticky="nsew")
         self.grid_rowconfigure(current_row, weight=1)
         current_row += 1
@@ -390,7 +390,7 @@ class AgentSummaryFrame(ctk.CTkFrame):
         self.label.grid(row=0, column=0, pady=(5,2), padx=5, sticky="w")
 
         # Scrollable frame for agent summary
-        self.scrollable_frame = ctk.CTkScrollableFrame(self, height=150)
+        self.scrollable_frame = ctk.CTkScrollableFrame(self, height=120) # Reduced height
         self.scrollable_frame.grid(row=1, column=0, pady=(0,5), padx=5, sticky="nsew")
         self.grid_rowconfigure(1, weight=1)
 
@@ -440,7 +440,7 @@ class SystemMetricsChartFrame(ctk.CTkFrame):
         self.avg_fitness_history = deque(maxlen=self.max_history)
 
         # Matplotlib figure and axis
-        self.fig, self.ax_fitness = plt.subplots(figsize=(5, 3), dpi=100)
+        self.fig, self.ax_fitness = plt.subplots(figsize=(4.8, 2.8), dpi=100) # Slightly reduced figure size
 
         # Embed Matplotlib canvas in Tkinter
         self.canvas = FigureCanvasTkAgg(self.fig, master=self)

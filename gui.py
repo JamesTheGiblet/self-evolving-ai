@@ -30,7 +30,7 @@ class SimulationGUI(ctk.CTk):
 
         # Window setup
         self.title("Self-Evolving AI Monitor")
-        self.geometry("950x850")
+        self.geometry("900x780") # Reduced window size
         self.grid_rowconfigure(0, weight=0)
 
         # Store references to simulation components
@@ -60,122 +60,166 @@ class SimulationGUI(ctk.CTk):
         self.tick_label.grid(row=current_row, column=0, columnspan=2, pady=(0,10), padx=10, sticky="ew")
         current_row += 1
 
-        content_start_row = current_row
+        # --- Tab View Setup ---
+        self.tab_view = ctk.CTkTabview(self)
+        self.tab_view.grid(row=current_row, column=0, columnspan=2, sticky="nsew", padx=10, pady=(0,10))
+        self.grid_rowconfigure(current_row, weight=1) # Make the tab view expandable
 
+        self.tab_landing_page = self.tab_view.add("Landing Page")
+        self.tab_system_metrics = self.tab_view.add("System Metrics")
+        self.tab_knowledge_tools = self.tab_view.add("Knowledge Tools")
+
+        # Configure grid for Landing Page tab (2 columns)
+        self.tab_landing_page.grid_columnconfigure(0, weight=1)
+        self.tab_landing_page.grid_columnconfigure(1, weight=1)
+        # Configure 3 main rows for the 6 blocks
+        self.tab_landing_page.grid_rowconfigure(0, weight=1) # Top row
+        self.tab_landing_page.grid_rowconfigure(1, weight=1) # Middle row
+        self.tab_landing_page.grid_rowconfigure(2, weight=1) # Bottom row
+        
+        # --- Populate Landing Page Tab ---
+        
+        # --- Block 1: Goal Submission & Info Labels (Top-Left) ---
+        block1_frame = ctk.CTkFrame(self.tab_landing_page)
+        block1_frame.grid(row=0, column=0, padx=5, pady=5, sticky="nsew")
+        block1_frame.grid_columnconfigure(0, weight=1) # Allow content to expand
+        
+        b1_current_row = 0
+        self.goal_section_frame = ctk.CTkFrame(block1_frame)
+        self.goal_section_frame.grid(row=b1_current_row, column=0, pady=(5,5), padx=5, sticky="new")
+        self.goal_section_frame.grid_columnconfigure(0, weight=1) 
+        self.goal_section_frame.grid_columnconfigure(1, weight=0) 
+
+        goal_frame_current_row = 0
+        self.goal_input_label = ctk.CTkLabel(self.goal_section_frame, text="Submit Custom Goal:", font=("Arial", 14))
+        self.goal_input_label.grid(row=goal_frame_current_row, column=0, columnspan=2, pady=(5,0), padx=5, sticky="w")
+        goal_frame_current_row += 1
+        self.goal_entry = ctk.CTkEntry(self.goal_section_frame, placeholder_text="Enter goal description...")
+        self.goal_entry.grid(row=goal_frame_current_row, column=0, pady=5, padx=5, sticky="ew")
+        self.send_goal_button = ctk.CTkButton(self.goal_section_frame, text="Send Goal", command=self.submit_custom_goal)
+        self.send_goal_button.grid(row=goal_frame_current_row, column=1, pady=5, padx=5, sticky="ew")
+        goal_frame_current_row += 1
+        self.goal_status_label = ctk.CTkLabel(self.goal_section_frame, text="", font=("Arial", 12))
+        self.goal_status_label.grid(row=goal_frame_current_row, column=0, columnspan=2, pady=(5,5), padx=5, sticky="w")
+        b1_current_row +=1
+        
         # Agent and system info labels
-        self.task_agents_label = ctk.CTkLabel(self, text="Task Agents: N/A", font=("Arial", 12))
-        self.task_agents_label.grid(row=content_start_row, column=0, pady=2, padx=10, sticky="w")
-
-        self.skill_agents_label = ctk.CTkLabel(self, text="Skill Agents: N/A", font=("Arial", 12))
-        self.skill_agents_label.grid(row=content_start_row + 1, column=0, pady=2, padx=10, sticky="w")
-
-        self.avg_fitness_label = ctk.CTkLabel(self, text="Avg. Fitness: N/A", font=("Arial", 12))
-        self.avg_fitness_label.grid(row=content_start_row + 2, column=0, pady=2, padx=10, sticky="w")
-
-        self.kb_size_label = ctk.CTkLabel(self, text="KB Size: N/A", font=("Arial", 12))
-        self.kb_size_label.grid(row=content_start_row + 3, column=0, pady=2, padx=10, sticky="w")
+        info_labels_frame = ctk.CTkFrame(block1_frame, fg_color="transparent")
+        info_labels_frame.grid(row=b1_current_row, column=0, pady=(5,0), padx=5, sticky="ew")
+        info_labels_frame.grid_columnconfigure(0, weight=1)
+        
+        self.task_agents_label = ctk.CTkLabel(info_labels_frame, text="Task Agents: N/A", font=("Arial", 12))
+        self.task_agents_label.grid(row=0, column=0, pady=1, padx=5, sticky="w")
+        self.skill_agents_label = ctk.CTkLabel(info_labels_frame, text="Skill Agents: N/A", font=("Arial", 12))
+        self.skill_agents_label.grid(row=1, column=0, pady=1, padx=5, sticky="w")
+        self.avg_fitness_label = ctk.CTkLabel(info_labels_frame, text="Avg. Fitness: N/A", font=("Arial", 12))
+        self.avg_fitness_label.grid(row=2, column=0, pady=1, padx=5, sticky="w")
+        self.kb_size_label = ctk.CTkLabel(info_labels_frame, text="KB Size: N/A", font=("Arial", 12))
+        self.kb_size_label.grid(row=3, column=0, pady=1, padx=5, sticky="w")
+        block1_frame.grid_rowconfigure(b1_current_row, weight=0) # Info labels don't expand much
+        b1_current_row +=1
+        block1_frame.grid_rowconfigure(0, weight=0) # Goal section doesn't expand much
 
         # Import visualization frames
         from gui_visualizations import (AgentMapFrame, MemoryStreamFrame, KnowledgeInjectionFrame,
                                         KnowledgeQueryFrame, AgentSummaryFrame, SystemMetricsChartFrame)
         from gui_agent_detail_view import AgentDetailWindow # Import the new detail window
 
-        # System metrics chart
-        self.system_metrics_chart_frame = SystemMetricsChartFrame(self, context_manager=self.context_manager, mutation_engine=self.mutation_engine)
-        self.system_metrics_chart_frame.grid(row=content_start_row, column=1, rowspan=4, pady=(0,5), padx=10, sticky="nsew")
+        # --- Block 2: Memory Stream (Top-Right) ---
+        self.memory_stream_frame = MemoryStreamFrame(self.tab_landing_page, knowledge_base=self.knowledge_base, context_manager=self.context_manager)
+        self.memory_stream_frame.grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
 
-        # Agent map and memory stream
-        self.agent_map_frame = AgentMapFrame(self, meta_agent=self.meta_agent, on_agent_click_callback=self.show_agent_detail)
-        self.memory_stream_frame = MemoryStreamFrame(self, knowledge_base=self.knowledge_base, context_manager=self.context_manager)
-        self.memory_stream_frame.grid(row=content_start_row + 4, column=1, rowspan=6, pady=(5,10), padx=10, sticky="nsew")
+        # --- Block 3: Agent Summary (Mid-Left) ---
+        self.agent_summary_frame = AgentSummaryFrame(self.tab_landing_page, meta_agent_ref=self.meta_agent, on_agent_select_callback=self.on_agent_select)
+        self.agent_summary_frame.grid(row=1, column=0, padx=5, pady=5, sticky="nsew")
 
-        current_row = content_start_row + 4
+        # --- Block 4: Agent Map (Mid-Right) ---
+        self.agent_map_frame = AgentMapFrame(self.tab_landing_page, meta_agent=self.meta_agent, on_agent_click_callback=self.show_agent_detail)
+        self.agent_map_frame.grid(row=1, column=1, padx=5, pady=5, sticky="nsew")
 
-        # Agent summary
-        self.agent_summary_frame = AgentSummaryFrame(self, meta_agent_ref=self.meta_agent, on_agent_select_callback=self.on_agent_select)
-        self.agent_summary_frame.grid(row=current_row, column=0, pady=5, padx=10, sticky="nsew")
-        current_row += 1
-
+        # --- Block 5: Feedback & Sim Controls (Bottom-Left) ---
+        block5_frame = ctk.CTkFrame(self.tab_landing_page)
+        block5_frame.grid(row=2, column=0, padx=5, pady=5, sticky="nsew")
+        block5_frame.grid_columnconfigure(0, weight=1)
+        block5_frame.grid_columnconfigure(1, weight=1)
+        
+        b5_current_row = 0
         # Feedback section
-        self.feedback_label = ctk.CTkLabel(self, text="Feedback for Selected Agent:", font=("Arial", 14))
-        self.feedback_label.grid(row=current_row, column=0, columnspan=2, pady=(10,0), padx=10, sticky="w")
-        current_row += 1
+        self.feedback_label = ctk.CTkLabel(block5_frame, text="Feedback for Selected Agent:", font=("Arial", 14))
+        self.feedback_label.grid(row=b5_current_row, column=0, columnspan=2, pady=(5,0), padx=5, sticky="w")
+        b5_current_row += 1
 
-        self.upvote_button = ctk.CTkButton(self, text="Upvote Selected", command=lambda: self.submit_feedback("upvote"))
-        self.upvote_button.grid(row=current_row, column=0, pady=5, padx=10, sticky="ew")
+        self.upvote_button = ctk.CTkButton(block5_frame, text="Upvote Selected", command=lambda: self.submit_feedback("upvote"))
+        self.upvote_button.grid(row=b5_current_row, column=0, pady=5, padx=5, sticky="ew")
 
-        self.downvote_button = ctk.CTkButton(self, text="Downvote Selected", command=lambda: self.submit_feedback("downvote"))
-        self.downvote_button.grid(row=current_row, column=1, pady=5, padx=10, sticky="ew")
-        current_row += 1
+        self.downvote_button = ctk.CTkButton(block5_frame, text="Downvote Selected", command=lambda: self.submit_feedback("downvote"))
+        self.downvote_button.grid(row=b5_current_row, column=1, pady=5, padx=5, sticky="ew")
+        b5_current_row += 1
 
-        self.feedback_status_label = ctk.CTkLabel(self, text="", font=("Arial", 12))
-        self.feedback_status_label.grid(row=current_row, column=0, columnspan=2, pady=5, padx=10, sticky="w")
-        current_row += 1
+        self.feedback_status_label = ctk.CTkLabel(block5_frame, text="", font=("Arial", 12))
+        self.feedback_status_label.grid(row=b5_current_row, column=0, columnspan=2, pady=(5,5), padx=5, sticky="w")
+        b5_current_row += 1
 
         # Simulation control buttons
-        self.start_button = ctk.CTkButton(self, text="Start Simulation", command=self.start_simulation)
-        self.start_button.grid(row=current_row, column=0, pady=20, padx=10, sticky="ew")
+        self.start_button = ctk.CTkButton(block5_frame, text="Start Simulation", command=self.start_simulation)
+        self.start_button.grid(row=b5_current_row, column=0, pady=(10,5), padx=5, sticky="ew")
 
-        self.stop_button = ctk.CTkButton(self, text="Stop Simulation", command=self.stop_simulation, state="disabled")
-        self.stop_button.grid(row=current_row, column=1, pady=20, padx=10, sticky="ew")
-        current_row += 1
+        self.stop_button = ctk.CTkButton(block5_frame, text="Stop Simulation", command=self.stop_simulation, state="disabled")
+        self.stop_button.grid(row=b5_current_row, column=1, pady=(10,5), padx=5, sticky="ew")
+        b5_current_row += 1
+        block5_frame.grid_rowconfigure(b5_current_row, weight=1) # Allow space below buttons to fill
 
+        # --- Block 6: Log & Insights (Bottom-Right) ---
+        block6_frame = ctk.CTkFrame(self.tab_landing_page)
+        block6_frame.grid(row=2, column=1, padx=5, pady=5, sticky="nsew")
+        block6_frame.grid_columnconfigure(0, weight=1)
+        block6_frame.grid_rowconfigure(1, weight=1) # Log textbox
+        block6_frame.grid_rowconfigure(3, weight=1) # Insights textbox
+        
+        b6_current_row = 0
         # Log area
-        self.log_textbox_label = ctk.CTkLabel(self, text="Simulation Log:", font=("Arial", 14))
-        self.log_textbox_label.grid(row=current_row, column=0, columnspan=2, pady=(10,0), padx=10, sticky="w")
-        current_row += 1
+        self.log_textbox_label = ctk.CTkLabel(block6_frame, text="Simulation Log:", font=("Arial", 14))
+        self.log_textbox_label.grid(row=b6_current_row, column=0, pady=(5,0), padx=5, sticky="w")
+        b6_current_row += 1
 
-        self.log_textbox = ctk.CTkTextbox(self, height=150, state="disabled")
-        self.log_textbox.grid(row=current_row, column=0, columnspan=2, pady=10, padx=10, sticky="nsew")
-        self.grid_rowconfigure(current_row, weight=1)
-        current_row += 1
+        self.log_textbox = ctk.CTkTextbox(block6_frame, height=120, state="disabled") 
+        self.log_textbox.grid(row=b6_current_row, column=0, pady=5, padx=5, sticky="nsew")
+        b6_current_row += 1
+        
+        # System Insights and notifications
+        self.insights_label = ctk.CTkLabel(block6_frame, text="System Insights & Notifications:", font=("Arial", 14))
+        self.insights_label.grid(row=b6_current_row, column=0, pady=(5,0), padx=5, sticky="w")
+        b6_current_row += 1
 
-        # Custom goal submission
-        self.goal_input_label = ctk.CTkLabel(self, text="Submit Custom Goal to System:", font=("Arial", 14))
-        self.goal_input_label.grid(row=current_row, column=0, columnspan=2, pady=(10,0), padx=10, sticky="w")
-        self.grid_rowconfigure(current_row, weight=0)
-        current_row += 1
+        self.insights_textbox = ctk.CTkTextbox(block6_frame, height=100, state="disabled") 
+        self.insights_textbox.grid(row=b6_current_row, column=0, pady=5, padx=5, sticky="nsew")
+        # --- End of Landing Page Tab ---
 
-        self.goal_entry = ctk.CTkEntry(self, placeholder_text="Enter goal description...")
-        self.goal_entry.grid(row=current_row, column=0, pady=5, padx=10, sticky="ew")
-        self.grid_rowconfigure(current_row, weight=0)
+        # --- Populate System Metrics Tab ---
+        self.tab_system_metrics.grid_rowconfigure(0, weight=1)
+        self.tab_system_metrics.grid_columnconfigure(0, weight=1)
+        self.system_metrics_chart_frame = SystemMetricsChartFrame(self.tab_system_metrics, context_manager=self.context_manager, mutation_engine=self.mutation_engine)
+        self.system_metrics_chart_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        # --- End of System Metrics Tab ---
 
-        self.send_goal_button = ctk.CTkButton(self, text="Send Goal", command=self.submit_custom_goal)
-        self.send_goal_button.grid(row=current_row, column=1, pady=5, padx=10, sticky="ew")
-        current_row += 1
-
-        self.goal_status_label = ctk.CTkLabel(self, text="", font=("Arial", 12))
-        self.goal_status_label.grid(row=current_row, column=0, columnspan=2, pady=5, padx=10, sticky="w")
-        self.grid_rowconfigure(current_row, weight=0)
-        current_row += 1
+        # --- Populate Knowledge Tools Tab ---
+        self.tab_knowledge_tools.grid_columnconfigure(0, weight=1) # Allow frames to expand width
+        self.tab_knowledge_tools.grid_columnconfigure(1, weight=1) # Add second column with equal weight
+        self.tab_knowledge_tools.grid_rowconfigure(0, weight=1) # Allow vertical expansion for the frames
 
         # Knowledge injection section
-        self.knowledge_injection_frame = KnowledgeInjectionFrame(self,
+        self.knowledge_injection_frame = KnowledgeInjectionFrame(self.tab_knowledge_tools,
                                                                  knowledge_base_ref=self.knowledge_base,
                                                                  context_manager_ref=self.context_manager,
                                                                  gui_logger_func=self.log_to_gui)
-        self.knowledge_injection_frame.grid(row=current_row, column=0, columnspan=2, pady=5, padx=10, sticky="ew")
-        self.grid_rowconfigure(current_row, weight=0)
-        current_row += 1
+        self.knowledge_injection_frame.grid(row=0, column=0, pady=(10,5), padx=5, sticky="nsew")
 
         # Knowledge query section
-        self.knowledge_query_frame = KnowledgeQueryFrame(self,
+        self.knowledge_query_frame = KnowledgeQueryFrame(self.tab_knowledge_tools,
                                                          knowledge_base_ref=self.knowledge_base,
                                                          gui_logger_func=self.log_to_gui)
-        self.knowledge_query_frame.grid(row=current_row, column=0, columnspan=2, pady=5, padx=10, sticky="ew")
-        self.grid_rowconfigure(current_row, weight=0)
-        current_row += 1
-
-        # System insights and notifications
-        self.insights_label = ctk.CTkLabel(self, text="System Insights & Notifications:", font=("Arial", 14))
-        self.insights_label.grid(row=current_row, column=0, columnspan=2, pady=(10,0), padx=10, sticky="w")
-        self.grid_rowconfigure(current_row, weight=0)
-        current_row += 1
-
-        self.insights_textbox = ctk.CTkTextbox(self, height=120, state="disabled")
-        self.insights_textbox.grid(row=current_row, column=0, columnspan=2, pady=5, padx=10, sticky="nsew")
-        self.grid_rowconfigure(current_row, weight=1)
-        current_row += 1
+        self.knowledge_query_frame.grid(row=0, column=1, pady=(10,5), padx=5, sticky="nsew")
+        # --- End of Knowledge Tools Tab ---
 
         # Start periodic UI update and set up window close protocol
         self.update_ui_elements()

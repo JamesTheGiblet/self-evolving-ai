@@ -1,4 +1,5 @@
 # core/meta_agent.py
+import json
 from typing import Dict, List, Optional, Any, TYPE_CHECKING
 import uuid # Add if not already imported
 from core import context_manager
@@ -17,8 +18,12 @@ if TYPE_CHECKING: # TYPE_CHECKING is True for static analysis
     from .task_router import TaskRouter
     # from .skill_agent import SkillAgent # Already imported above
     from engine.identity_engine import IdentityEngine
+    from agents.code_gen_agent import CodeGenAgent # If MetaAgent manages CodeGenAgent lifecycle
 
-class MetaAgent:
+
+class MetaAgent: # Ensure it inherits from BaseAgent for message handling
+    AGENT_TYPE = "meta" # Class attribute for agent type
+
     def __init__(self, 
                  context: ContextManager, 
                  knowledge: KnowledgeBase, 
@@ -26,7 +31,8 @@ class MetaAgent:
                  skill_agents: List['SkillAgent'],
                  identity_engine: 'IdentityEngine', # Accept IdentityEngine instance
                  default_task_agent_config: Dict[str, Any],  # Added
-                 default_skill_agent_configs: List[Dict[str, Any]]): # Added
+                 default_skill_agent_configs: List[Dict[str, Any]],
+                 code_gen_agent: Optional['CodeGenAgent'] = None): # Optional CodeGenAgent
         self.name = "MetaAgent" # Added name attribute
 
         self.context = context
@@ -47,6 +53,7 @@ class MetaAgent:
             log(f"MetaAgent '{self.name}' initialized and registered on communication bus.", level="INFO")
 
         self.identity_engine = identity_engine # Use the passed IdentityEngine instance
+        self.code_gen_agent = code_gen_agent # Store CodeGenAgent if provided
         
         self.default_task_agent_config = default_task_agent_config
         self.default_skill_agent_configs = default_skill_agent_configs # Store the passed list
@@ -85,6 +92,10 @@ class MetaAgent:
         # Dynamic registry for skill actions -> list of agent names providing that action
         self.skill_action_registry: Dict[str, List[str]] = {}
         self._update_skill_action_registry() # Initial population
+        
+        # To store received service advertisements
+        self.service_advertisements: Dict[str, Dict[str, Any]] = {} # agent_id -> advertisement_payload
+
 
     def set_task_router(self, task_router: 'TaskRouter'):
         self.task_router = task_router
@@ -104,7 +115,20 @@ class MetaAgent:
         if skill_name and command_name:
             target_skill_agent = None
             for agent in self.skill_agents:
-                if agent.name == skill_name: # Matching by SkillAgent's name
+                # Skill agents are named like "skill_calendar_ops_0"
+                # TaskRouter's skill_name is "Calendar"
+                # We need to match based on the skill_tool's name or a derived lineage.
+                # For now, let's assume TaskRouter returns the agent's direct name if it can.
+                # If TaskRouter returns the skill_tool's class name (e.g., "Calendar"),
+                # we need to match against agent.skill_tool.skill_name or similar.
+                
+                # Option 1: TaskRouter returns the SkillAgent's unique name (e.g., "skill_calendar_ops_0")
+                # if agent.name == skill_name: # This would work if TaskRouter returns the agent's unique name
+
+                # Option 2: TaskRouter returns the SkillTool's class name (e.g., "Calendar")
+                # We need to check if the agent's skill_tool matches this.
+                if hasattr(agent, 'skill_tool') and agent.skill_tool and \
+                   hasattr(agent.skill_tool, 'skill_name') and agent.skill_tool.skill_name == skill_name:
                     target_skill_agent = agent
                     break
             
@@ -122,8 +146,29 @@ class MetaAgent:
                  # import shlex
                  # command_str_for_skill = shlex.join(command_parts)
 
-                log(f"[MetaAgent] Executing routed command on {skill_name}: '{command_str_for_skill}'", level="INFO")
-                result_json_str = target_skill_agent.execute(command_str_for_skill)
+                log(f"[MetaAgent] Executing routed command on {target_skill_agent.name} (Skill: {skill_name}): '{command_str_for_skill}'", level="INFO")
+                # SkillAgent.execute_skill_action is the method that takes the command string.
+                # It's called internally by SkillAgent when it receives a message.
+                # For MetaAgent to directly call it, it would need to simulate that message or
+                # call a more direct execution path if available.
+                # For now, let's assume SkillAgent has a direct `execute` method that maps to its tool.
+                # This depends on SkillAgent's interface.
+                # If SkillAgent.execute() is the intended public method:
+                # result_json_str = target_skill_agent.execute(command_str_for_skill)
+                
+                # If we need to use the more detailed execute_skill_action:
+                # This requires knowing the invoking_agent_id and task_id.
+                # For a direct user request, MetaAgent can be the invoking_agent_id.
+                task_id_for_direct_request = f"meta_direct_{uuid.uuid4().hex[:8]}"
+                result_dict = target_skill_agent.execute_skill_action(
+                    skill_command_str=command_str_for_skill,
+                    params={}, # Params are already in command_str_for_skill for BaseSkillTool
+                    invoking_agent_id=self.name,
+                    task_id=task_id_for_direct_request
+                )
+                # execute_skill_action returns a dict, convert to JSON string if needed by caller
+                result_json_str = json.dumps(result_dict)
+
                 log(f"[MetaAgent] Result from {skill_name}: {result_json_str[:200]}...", level="INFO")
                 return result_json_str # Return the JSON string from the skill
             else:
@@ -146,10 +191,30 @@ class MetaAgent:
         # This is where the MetaAgent would start processing a new goal,
         # potentially using handle_user_request or a more complex planning mechanism.
         log(f"[MetaAgent] Received new user goal: {goal_description}", level="INFO")
-        # For now, let's just try to handle it as a direct request
-        response = self.handle_user_request(goal_description)
-        log(f"[MetaAgent] Response to user goal '{goal_description}': {response[:200]}...", level="INFO")
-        # In a real system, this response would be communicated back or used to drive further actions.
+        
+        # Option 1: Try to route it like a direct request
+        # response = self.handle_user_request(goal_description)
+        # log(f"[MetaAgent] Response to user goal '{goal_description}': {response[:200]}...", level="INFO")
+
+        # Option 2: Assign it to a TaskAgent
+        # Find an idle or suitable TaskAgent
+        target_task_agent = None
+        if self.task_agents:
+            # Simple strategy: pick the first one or one with least load (if trackable)
+            target_task_agent = self.task_agents[0] 
+        
+        if target_task_agent:
+            log(f"[MetaAgent] Assigning user goal '{goal_description}' to TaskAgent '{target_task_agent.name}'.", level="INFO")
+            # TaskAgent needs a method to receive and process such goals.
+            # Example: target_task_agent.set_goal({"type": "user_defined_goal", "details": {"description": goal_description}})
+            if hasattr(target_task_agent, 'set_goal'):
+                target_task_agent.set_goal({"type": "user_defined_goal", "details": {"description": goal_description}})
+            else:
+                log(f"[MetaAgent] TaskAgent '{target_task_agent.name}' does not have 'set_goal' method. Cannot assign goal.", level="ERROR")
+                # Fallback or error handling
+        else:
+            log("[MetaAgent] No TaskAgents available to handle the user goal. Goal not assigned.", level="WARN")
+            # Fallback or error handling
 
     def run_agents(self):
         """Runs the operational cycle for all managed agents (Task and Skill)."""
@@ -165,18 +230,20 @@ class MetaAgent:
         agent_info_map: Dict[str, Dict[str, Any]] = {}
         for agent_instance in self.agents: 
             if hasattr(agent_instance, 'get_config'):
+                agent_config = agent_instance.get_config()
                 agent_info_map[agent_instance.name] = {
                     "agent_type": agent_instance.agent_type,
                     "name": agent_instance.name,
                     "generation": agent_instance.generation,
                     "lineage_id": agent_instance.lineage_id,
                     "capabilities": agent_instance.capabilities[:], 
-                    "is_active": agent_instance.state.get("status") == "active" if hasattr(agent_instance, 'state') else True,
+                    "is_active": agent_config.get("state", {}).get("status") == "active",
+                    # Add other relevant info from agent_config if needed
                 }
-            else:
+            else: # Fallback for agents that might not have get_config (should not happen for BaseAgent derivatives)
                  agent_info_map[agent_instance.name] = {
-                    "agent_type": "unknown",
-                    "name": agent_instance.name,
+                    "agent_type": getattr(agent_instance, 'agent_type', "unknown"),
+                    "name": getattr(agent_instance, 'name', "UnknownAgent"),
                     "is_active": True 
                  }
 
@@ -208,6 +275,7 @@ class MetaAgent:
     def _process_meta_agent_messages(self):
         """
         MetaAgent processes its own messages from the communication bus.
+        This now includes handling SERVICE_ADVERTISEMENT messages.
         """
         if not self.communication_bus:
             return
@@ -215,14 +283,51 @@ class MetaAgent:
         messages = self.communication_bus.get_messages_for_agent(self.name)
         for msg_envelope in messages:
             sender_id = msg_envelope.get('sender')
-            content = msg_envelope.get('content', {})
-            action = content.get('action')
+            content = msg_envelope.get('content', {}) # Content is the advertisement_message itself
+            message_type = content.get('type') 
             message_id = msg_envelope.get('id')
 
-            if action == "provision_temporary_skill_agent":
+            log(f"[{self.name}] Received message from '{sender_id}'. Type: '{message_type}'. Content: {str(content)[:150]}", level="DEBUG")
+
+            if message_type == "SERVICE_ADVERTISEMENT":
+                payload = content.get('payload', {})
+                advertised_agent_id = payload.get('agent_id')
+                services_offered = payload.get('services_offered')
+                service_details = payload.get('service_details')
+
+                log(f"[{self.name}] Received SERVICE_ADVERTISEMENT from Agent ID: {advertised_agent_id}, Services: {services_offered}", level="INFO")
+
+                if advertised_agent_id:
+                    self.service_advertisements[advertised_agent_id] = copy.deepcopy(payload)
+                    log(f"[{self.name}] Updated/recorded advertisement for {advertised_agent_id}. Details: {service_details}", level="DEBUG")
+                    
+                    # Optional: If a new skill agent advertises that MetaAgent wasn't aware of,
+                    # you might want to update registries here.
+                    # For now, we assume initial registration covers all static skills.
+                    # This part becomes more relevant if SkillAgents can be added dynamically post-boot.
+                    # Example: if advertised_agent_id not in [sa.id for sa in self.skill_agents]:
+                    #    log(f"[{self.name}] New SkillAgent '{advertised_agent_id}' advertised. Consider dynamic registration.", level="INFO")
+                    #    # Potentially trigger logic to formally add/recognize this agent if it's truly new
+                    #    # and not just an update from an existing one.
+                    #    # This might involve checking if it's a known lineage or a completely novel agent.
+                    
+                    # Update KnowledgeBase with this service listing
+                    if self.knowledge and hasattr(self.knowledge, 'store_service_listing'):
+                        self.knowledge.store_service_listing(
+                            agent_id=advertised_agent_id,
+                            agent_name=payload.get('agent_name'),
+                            agent_type=payload.get('agent_type'),
+                            services_offered=services_offered,
+                            service_details=service_details,
+                            timestamp=payload.get('timestamp', self.context.get_tick())
+                        )
+                        log(f"[{self.name}] Stored service listing for {advertised_agent_id} in KnowledgeBase.", level="DEBUG")
+
+
+            elif content.get('action') == "provision_temporary_skill_agent": # Existing action
                 lineage_id_to_provision = content.get('lineage_id')
-                requesting_agent_id = content.get('requesting_agent_id') # ID of the TaskAgent that made the request
-                original_request_details = content.get('original_request_details', {}) # For context or potential retry signalling
+                requesting_agent_id = content.get('requesting_agent_id') 
+                original_request_details = content.get('original_request_details', {})
 
                 log(f"[{self.name}] Received request from '{requesting_agent_id}' to provision temporary skill agent for lineage '{lineage_id_to_provision}'.", level="INFO")
                 
@@ -232,18 +337,18 @@ class MetaAgent:
                     original_request_details=original_request_details
                 )
                 
-                # Optionally, send a status message back to the requesting TaskAgent
                 if requesting_agent_id:
                     response_content = {
                         "action": "provisioning_status_response",
                         "lineage_id": lineage_id_to_provision,
                         "provisioning_successful": provisioning_success,
-                        "original_request_details": original_request_details # Echo back for context
+                        "original_request_details": original_request_details 
                     }
                     self.communication_bus.send_direct_message(self.name, requesting_agent_id, response_content)
             
-            if message_id: # Ensure message_id is present before marking
+            if message_id: 
                 self.communication_bus.mark_message_processed(message_id)
+
 
     def _provision_temporary_skill_agent(self, lineage_id: str, requesting_agent_id: Optional[str] = None, original_request_details: Optional[Dict] = None) -> bool:
         """
@@ -465,3 +570,4 @@ class MetaAgent:
                     except Exception as e:
                         log(f"[{self.name}] Error getting/processing capabilities from skill_tool {type(tool)} for agent {skill_agent_instance.name}: {e}", level="ERROR")
         log(f"[{self.name}] Skill action registry updated. {len(self.skill_action_registry)} actions mapped. Example action 'add' providers: {self.skill_action_registry.get('add', [])}", level="DEBUG")
+

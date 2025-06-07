@@ -113,6 +113,7 @@ class TaskAgent(BaseAgent):
         self.state.setdefault('pending_llm_operations', {})
         self.state.setdefault('pending_skill_requests', {})
         self.last_diagnosis: Optional[Dict[str, Any]] = None
+        self.state.setdefault('pending_contract_acknowledgements', {}) # For tracking contract agreements
         self.state.setdefault('pending_negotiations', {}) # For tracking skill offers
         self.conversation_history: List[Dict[str, str]] = []
 
@@ -130,31 +131,85 @@ class TaskAgent(BaseAgent):
         
         log(f"[{self.name} ID:{self.id}] TaskAgent initialized. Role: {self.role}, Behavior: {self.behavior_mode}, Initial Energy: {self.initial_energy:.2f}")
 
+    def _send_contract_agreement(self, negotiation_id: str, skill_agent_id: str, capability_requested: str, tool_command_str: str, agreed_terms: Dict[str, Any]):
+        """Sends a CONTRACT_AGREEMENT message to the SkillAgent."""
+        contract_id = negotiation_id # Use negotiation_id as contract_id
 
+        contract_agreement_message = {
+            "type": "CONTRACT_AGREEMENT",
+            "payload": {
+                "contract_id": contract_id,
+                "task_agent_id": self.id,
+                "skill_agent_id": skill_agent_id,
+                "capability_requested": capability_requested,
+                "tool_command_str": tool_command_str,
+                "agreed_terms": agreed_terms,
+                "success_conditions": "SkillAgent reports success_skill_execution.", # Placeholder
+                "failure_conditions": "SkillAgent reports failure or timeout."     # Placeholder
+            },
+            "recipient_agent_id": skill_agent_id
+        }
+
+        success = self.communication_bus.send_direct_message(
+            sender_id=self.name,
+            recipient_id=skill_agent_id,
+            message_content=contract_agreement_message
+        )
+
+        if success:
+            self.state['pending_contract_acknowledgements'][contract_id] = {
+                "skill_agent_id": skill_agent_id,
+                "capability_requested": capability_requested,
+                "tool_command_str": tool_command_str,
+                "agreed_terms": agreed_terms,
+                "status": "agreement_sent",
+                "sent_at_tick": self.context_manager.get_tick(),
+                "original_invoking_capability_request_id": self.state['pending_negotiations'][negotiation_id].get("original_invoking_capability_request_id")
+            }
+            log(f"[{self.name}] Sent CONTRACT_AGREEMENT (ID: {contract_id}) to '{skill_agent_id}'. Terms: {agreed_terms}", level="INFO")
+        else:
+            log(f"[{self.name}] Failed to send CONTRACT_AGREEMENT (ID: {contract_id}) to '{skill_agent_id}'.", level="ERROR")
+            # Potentially revert negotiation status or retry
+
+        # --- Query KnowledgeBase for service listings ---
+        # skill_action_to_request is the conceptual capability, e.g., "maths_operation"
+        # However, SkillAgents advertise their primary service capability, e.g., "maths_ops_v1"
+        # We need a mapping from the requested action to the service capability name.
+        # For now, let's assume skill_action_to_request IS the service capability name
+        # or that the capability invoking this method provides the correct service capability name.
+        # This part might need refinement based on how `invoke_skill_agent_v1` determines what to ask for.
+        # Let's assume `skill_action_to_request` is the *service capability name* (e.g. "maths_ops_v1")
+        
     def find_best_skill_agent_for_action(self, skill_action_to_request: str, preferred_target_id: Optional[str] = None) -> Optional[str]:
         if not skill_action_to_request:
             log(f"[{self.name}] find_best_skill_agent_for_action: No skill_action_to_request provided.", level="WARNING")
             return None
+                
+        service_capability_to_query = skill_action_to_request # TODO: Refine this mapping if needed
+        
+        log(f"[{self.name}] Querying KnowledgeBase for service listings offering '{service_capability_to_query}'. Preferred target (lineage): {preferred_target_id}", level="DEBUG")
+        
+        # Query the KnowledgeBase
+        # The capability_needed here should be the service name like "calendar_ops_v1"
+        # The SKILL_CAPABILITY_MAPPING maps "calendar_ops_v1" to ["current_date", "add_event", ...]
+        # SkillAgent.advertise_services() uses self.capabilities which is like ["calendar_ops_v1"]
+        
+        # If skill_action_to_request is a specific command (e.g., "add"), we need to find which service offers it.
+        # For now, let's assume skill_action_to_request is the *service name* itself (e.g., "maths_ops_v1")
+        # This means the calling capability (like invoke_skill_agent_v1) needs to know the service name.
+        
+        matching_service_advertisements = self.knowledge_base.query_service_listings(
+            capability_needed=service_capability_to_query, # This should be the service like "maths_ops_v1"
+            current_tick=self.context_manager.get_tick()
+            # We can add min_reputation later
+        )
 
-        # Get potential agent names from the dynamic registry provided by MetaAgent
-        potential_agent_names = self.current_skill_action_registry.get(skill_action_to_request, [])
-
-        if not potential_agent_names:
-            log(f"[{self.name}] find_best_skill_agent_for_action: No SkillAgents registered for action '{skill_action_to_request}' in current_skill_action_registry.", level="WARNING")
+        if not matching_service_advertisements:
+            log(f"[{self.name}] find_best_skill_agent_for_action: No service listings found in KnowledgeBase for service '{service_capability_to_query}'.", level="WARNING")
             return None
 
-        # Filter these potential agents by their active status using self.agent_info_map
-        active_and_capable_agents = [
-            name for name in potential_agent_names
-            if self.agent_info_map.get(name, {}).get("agent_type") == "skill" and \
-               self.agent_info_map.get(name, {}).get("is_active", False)
-        ]
-
-        if not active_and_capable_agents:
-            log(f"[{self.name}] find_best_skill_agent_for_action: Found {len(potential_agent_names)} agents for action '{skill_action_to_request}', but none are currently active or in agent_info_map.", level="WARNING")
-            return None
-
-        log(f"[{self.name}] find_best_skill_agent_for_action: Active agents for '{skill_action_to_request}': {active_and_capable_agents}", level="DEBUG")
+        active_and_capable_agents = [listing.get("agent_id") for listing in matching_service_advertisements if listing.get("agent_id")]
+        log(f"[{self.name}] find_best_skill_agent_for_action: Agents from KB for '{service_capability_to_query}': {active_and_capable_agents}", level="DEBUG")
 
         chosen_target_skill_agent_id = None
         if preferred_target_id:
@@ -169,16 +224,15 @@ class TaskAgent(BaseAgent):
                 chosen_target_skill_agent_id = random.choice(agents_in_preferred_lineage)
                 log(f"[{self.name}] find_best_skill_agent_for_action: Using agent '{chosen_target_skill_agent_id}' from preferred lineage '{preferred_target_id}' for action '{skill_action_to_request}'.")
             else:
-                # Preferred lineage ID was given, but no suitable (or active) agent from that lineage can perform the action.
-                log(f"[{self.name}] find_best_skill_agent_for_action: No suitable agent from preferred lineage '{preferred_target_id}' can perform '{skill_action_to_request}'. Looking for any suitable alternative. Active & capable: {active_and_capable_agents}", level="WARNING")
+                log(f"[{self.name}] find_best_skill_agent_for_action: No agent from preferred lineage '{preferred_target_id}' found for service '{service_capability_to_query}'. Looking for any suitable alternative. Agents from KB: {active_and_capable_agents}", level="WARNING")
         
         # Fallback if no preferred target was given, or if preferred lineage had no suitable agent
         if not chosen_target_skill_agent_id and active_and_capable_agents: # Check active_and_capable_agents again
             chosen_target_skill_agent_id = random.choice(active_and_capable_agents)
-            log(f"[{self.name}] find_best_skill_agent_for_action: Selected suitable agent '{chosen_target_skill_agent_id}' for action '{skill_action_to_request}'. Active & capable: {active_and_capable_agents}")
+            log(f"[{self.name}] find_best_skill_agent_for_action: Selected agent '{chosen_target_skill_agent_id}' for service '{service_capability_to_query}'. Agents from KB: {active_and_capable_agents}")
         
         if not chosen_target_skill_agent_id:
-            log(f"[{self.name}] find_best_skill_agent_for_action: No suitable target agent found for skill action '{skill_action_to_request}'. Active & capable: {active_and_capable_agents}, All registered for action: {potential_agent_names}", level="WARNING")
+            log(f"[{self.name}] find_best_skill_agent_for_action: No suitable target agent found for service '{service_capability_to_query}'. Agents from KB: {active_and_capable_agents}", level="WARNING")
             return None
             
         return chosen_target_skill_agent_id
@@ -655,51 +709,65 @@ class TaskAgent(BaseAgent):
                 response_payload = response_message['content'].get('payload', {})
                 response_type = response_payload.get('response_type')
                 log(f"[{self.name}] Received TASK_OFFER_RESPONSE for NegID '{neg_id}' from '{response_payload.get('responder_agent_id')}'. Type: {response_type}", level="INFO")
- 
+
                 if response_type == "accept":
                     neg_details["status"] = "accepted"
                     actual_terms = response_payload.get("actual_terms", neg_details["proposed_terms"])
                     log(f"[{self.name}] Offer NegID '{neg_id}' ACCEPTED by '{neg_details['target_skill_agent_id']}' for '{neg_details['capability_requested']}'. Agreed terms: {actual_terms}", level="INFO")
  
-                    # --- Initiate actual skill execution based on accepted negotiation ---
-                    skill_execution_request_id = neg_details.get("original_invoking_capability_request_id", f"skill_req_{neg_id}")
- 
-                    # Prepare the message for the SkillAgent
-                    skill_execution_message_content = {
-                        "action": neg_details["capability_requested"], # The conceptual capability
-                        "request_id": skill_execution_request_id,
-                        "data": { # This is the 'params_from_message' for SkillAgent
-                            "tool_command_str": neg_details["tool_command_str"],
-                            # Pass other relevant data if needed by the skill tool
-                        }
-                    }
- 
-                    # Store in pending_skill_requests, including the agreed terms for payment
-                    self.state['pending_skill_requests'][skill_execution_request_id] = {
-                        "target_skill_agent_id": neg_details["target_skill_agent_id"],
-                        "capability_name": neg_details["capability_requested"], # Or a more generic "negotiated_skill_invocation"
-                        "request_data": skill_execution_message_content['data'], # What was sent to skill agent
-                        "original_rl_state": self.state.get("last_rl_state_before_action", self._get_rl_state_representation()), # Use a recent RL state
-                        "success_reward": actual_terms.get("reward_for_success", 1.0), # Default reward if not in terms
-                        "failure_reward": -1.0, # Default failure penalty
-                        "timeout_reward": -0.5, # Default timeout penalty
-                        "timeout_at_tick": self.context_manager.get_tick() + actual_terms.get("deadline_ticks", 50) - self.context_manager.get_tick() + 10, # From agreed deadline
-                        "agreed_terms": actual_terms # Store the actual agreed terms for payment
-                    }
- 
-                    # Send the skill execution command to the SkillAgent
-                    self.communication_bus.send_direct_message(
-                        sender_id=self.name,
-                        recipient_id=neg_details["target_skill_agent_id"],
-                        message_content=skill_execution_message_content
+                    # Send CONTRACT_AGREEMENT instead of direct skill execution
+                    self._send_contract_agreement(
+                        negotiation_id=neg_id,
+                        skill_agent_id=neg_details["target_skill_agent_id"],
+                        capability_requested=neg_details["capability_requested"],
+                        tool_command_str=neg_details["tool_command_str"],
+                        agreed_terms=actual_terms
                     )
-                    log(f"[{self.name}] Sent skill execution request (ReqID: {skill_execution_request_id}) to '{neg_details['target_skill_agent_id']}' after accepted negotiation (NegID: {neg_id}).", level="INFO")
-                    # --- End skill execution initiation ---
+                    # Negotiation is resolved, but contract acknowledgement is pending.
+                    # Skill execution will happen after CONTRACT_ACKNOWLEDGED.
+
                 elif response_type == "reject":
                     neg_details["status"] = "rejected"
                     log(f"[{self.name}] Offer NegID '{neg_id}' REJECTED by '{neg_details['target_skill_agent_id']}'. Reason: {response_payload.get('reason')}", level="INFO")
-                # TODO: Handle "counter_offer"
-                
+                elif response_type == "counter_offer":
+                    counter_terms = response_payload.get("counter_proposed_terms")
+                    log(f"[{self.name}] Offer NegID '{neg_id}' received COUNTER-OFFER from '{neg_details['target_skill_agent_id']}'. Counter Terms: {counter_terms}", level="INFO")
+
+                    if not counter_terms:
+                        log(f"[{self.name}] Counter-offer for NegID '{neg_id}' is missing terms. Rejecting.", level="WARN")
+                        neg_details["status"] = "counter_rejected_invalid"
+                        # Optionally send a message back indicating invalid counter-offer
+                    else:
+                        # Simple evaluation of counter-offer:
+                        # Accept if new reward is not more than 1.5x original proposed reward
+                        # AND new cost is not more than 1.2x original max_acceptable_cost.
+                        original_proposed_reward = neg_details["proposed_terms"]["reward_for_success"]
+                        original_max_cost = neg_details["proposed_terms"]["max_energy_cost_to_task_agent"]
+                        
+                        counter_reward = counter_terms.get("reward_for_success", float('inf'))
+                        counter_cost_charged = counter_terms.get("energy_cost_charged_to_task_agent", float('inf'))
+
+                        if counter_reward <= original_proposed_reward * 1.5 and \
+                           counter_cost_charged <= original_max_cost * 1.2 and \
+                           counter_cost_charged <= self.energy: # Check if TaskAgent can afford this cost
+                            
+                            neg_details["status"] = "counter_accepted"
+                            neg_details["agreed_terms"] = counter_terms # Store the NEWLY agreed terms
+                            log(f"[{self.name}] Counter-offer NegID '{neg_id}' ACCEPTED. Agreed terms: {counter_terms}", level="INFO")
+
+                            # Send CONTRACT_AGREEMENT based on accepted counter-offer
+                            self._send_contract_agreement(
+                                negotiation_id=neg_id,
+                                skill_agent_id=neg_details["target_skill_agent_id"],
+                                capability_requested=neg_details["capability_requested"],
+                                tool_command_str=neg_details["tool_command_str"],
+                                agreed_terms=counter_terms # Use the counter_terms
+                            )
+                            # Negotiation is resolved, contract acknowledgement pending.
+                        else:
+                            neg_details["status"] = "counter_rejected"
+                            log(f"[{self.name}] Counter-offer NegID '{neg_id}' REJECTED. Original proposed reward: {original_proposed_reward}, counter: {counter_reward}. Original max cost: {original_max_cost}, counter: {counter_cost_charged}", level="INFO")
+                            # Optionally, send a "COUNTER_OFFER_REJECTED" message back to SkillAgent
                 self.communication_bus.mark_message_processed(response_message['id'])
                 resolved_negotiation_ids.append(neg_id)
             
@@ -709,6 +777,59 @@ class TaskAgent(BaseAgent):
 
         for neg_id in resolved_negotiation_ids:
             self.state['pending_negotiations'].pop(neg_id, None)
+
+    def _handle_contract_acknowledgements(self):
+        """Handles CONTRACT_ACKNOWLEDGED messages from SkillAgents."""
+        current_tick = self.context_manager.get_tick()
+        if not self.state.get('pending_contract_acknowledgements'):
+            return
+
+        resolved_contract_ids = []
+        for contract_id, contract_details in list(self.state['pending_contract_acknowledgements'].items()):
+            if contract_details["status"] != "agreement_sent":
+                # TODO: Handle timeout for acknowledgement
+                continue
+
+            ack_message = self.communication_bus.get_message_by_request_id(
+                recipient_agent_name=self.name,
+                request_id_to_find=contract_id, # Match by contract_id
+                message_type_filter="CONTRACT_ACKNOWLEDGED"
+            )
+
+            if ack_message:
+                ack_payload = ack_message['content'].get('payload', {})
+                log(f"[{self.name}] Received CONTRACT_ACKNOWLEDGED for ContractID '{contract_id}' from '{ack_payload.get('skill_agent_id')}'.", level="INFO")
+
+                if ack_payload.get("status") == "acknowledged":
+                    contract_details["status"] = "acknowledged"
+                    # Now initiate the actual skill execution
+                    skill_execution_request_id = contract_details.get("original_invoking_capability_request_id", f"skill_req_{contract_id}")
+                    
+                    skill_execution_message_content = {
+                        "action": contract_details["capability_requested"],
+                        "request_id": skill_execution_request_id, # Use contract_id or original request_id
+                        "data": {"tool_command_str": contract_details["tool_command_str"]}
+                    }
+                    self.state['pending_skill_requests'][skill_execution_request_id] = {
+                        "target_skill_agent_id": contract_details["skill_agent_id"],
+                        "capability_name": contract_details["capability_requested"],
+                        "request_data": skill_execution_message_content['data'],
+                        "original_rl_state": self.state.get("last_rl_state_before_action", self._get_rl_state_representation()),
+                        "success_reward": contract_details["agreed_terms"]["reward_for_success"],
+                        "failure_reward": -1.0, # Standard failure penalty
+                        "timeout_reward": -0.5, # Standard timeout penalty
+                        "timeout_at_tick": current_tick + contract_details["agreed_terms"].get("deadline_ticks", 50) - current_tick + 10, # Use agreed deadline
+                        "agreed_terms": contract_details["agreed_terms"] # Store the final agreed terms
+                    }
+                    self.communication_bus.send_direct_message(self.name, contract_details["skill_agent_id"], skill_execution_message_content)
+                    log(f"[{self.name}] Contract '{contract_id}' acknowledged. Sent skill execution request (ReqID: {skill_execution_request_id}) to '{contract_details['skill_agent_id']}'.", level="INFO")
+                
+                self.communication_bus.mark_message_processed(ack_message['id'])
+                resolved_contract_ids.append(contract_id)
+            # TODO: Add timeout logic for acknowledgements
+
+        for contract_id in resolved_contract_ids:
+            self.state['pending_contract_acknowledgements'].pop(contract_id, None)
 
     def _handle_pending_llm_operations(self):
         current_tick = self.context_manager.get_tick()
@@ -959,6 +1080,7 @@ class TaskAgent(BaseAgent):
         self._handle_pending_skill_responses()
         self._handle_pending_llm_operations()
         self._handle_negotiation_responses() # Handle negotiation responses
+        self._handle_contract_acknowledgements() # Handle contract acknowledgements
         
         chosen_capability_name: Optional[str] = None
         cap_inputs_for_execution: Dict[str, Any] = {}

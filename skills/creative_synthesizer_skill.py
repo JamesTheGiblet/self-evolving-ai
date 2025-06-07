@@ -3,8 +3,7 @@
 import json
 import datetime # Keep this import
 from typing import Dict, Any, List, TYPE_CHECKING, Optional
-
-from base_skill import BaseSkillTool
+from .base_skill import BaseSkillTool
 from utils.logger import log
 
 # For type hinting core components to avoid circular imports at runtime

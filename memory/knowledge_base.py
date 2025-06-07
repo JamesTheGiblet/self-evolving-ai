@@ -300,6 +300,63 @@ class KnowledgeBase:
         log(f"[KnowledgeBase] Queried user facts with params '{query_params}', found {len(matched_facts)} matches. Tick: {current_tick}", level="DEBUG")
         return matched_facts
 
+    def store_service_advertisement(self, service_payload: Dict[str, Any], current_tick: int) -> str:
+        """
+        Stores or updates a service advertisement from a SkillAgent.
+        The service_payload is the payload of the SERVICE_ADVERTISEMENT message.
+        """
+        agent_id = service_payload.get("agent_id")
+        if not agent_id:
+            log("[KnowledgeBase] Cannot store service advertisement: agent_id missing in payload.", level="WARN")
+            return ""
+
+        # Use agent_id as the primary key for service listings to allow updates.
+        # We can store the entire payload as the 'data' of the fact.
+        # The 'fact_type' will be 'service_listing'.
+        # 'source' can be the agent_id itself.
+
+        fact_id = f"service_{agent_id}" # Unique ID for this service listing based on agent_id
+
+        fact_data_to_store = {
+            "fact_id": fact_id,
+            "fact_type": "service_listing",
+            "source": agent_id, # The agent advertising the service
+            "timestamp": time.time(),
+            "tick_created": current_tick,
+            "tick_last_accessed": current_tick,
+            "access_count": 0,
+            "relevance_score": config.KB_INITIAL_RELEVANCE_SCORE, # Initial relevance
+            "data": service_payload # Store the full advertisement payload
+        }
+
+        # This part assumes self.facts is the primary dictionary for storing these.
+        # If you have a separate structure for service listings, adjust accordingly.
+        # For simplicity, we'll use the existing self.facts structure.
+        # A lock might be needed if accessed by multiple threads, similar to FactMemory.
+        # For now, assuming single-threaded access or external locking for KB.
+        self.facts[fact_id] = fact_data_to_store # Add or overwrite existing entry
+
+        log(f"[KnowledgeBase] Stored/Updated service advertisement for agent '{agent_id}'. Fact ID: {fact_id}", level="INFO")
+        return fact_id
+
+    def query_service_listings(self, capability_needed: str, current_tick: int, min_reputation: Optional[float] = None) -> List[Dict[str, Any]]:
+        """
+        Queries active service listings for a specific capability.
+        """
+        matching_listings: List[Dict[str, Any]] = []
+        for fact_id, fact_data in self.facts.items(): # Iterate over a copy if modification during iteration is possible
+            if fact_data.get("fact_type") == "service_listing":
+                service_payload = fact_data.get("data", {})
+                if capability_needed in service_payload.get("services_offered", []):
+                    if min_reputation is not None:
+                        if service_payload.get("service_details", {}).get("reputation_score", 0.0) < min_reputation:
+                            continue
+                    matching_listings.append(service_payload)
+                    fact_data["tick_last_accessed"] = current_tick # Update access tick
+                    fact_data["access_count"] = fact_data.get("access_count", 0) + 1
+        log(f"[KnowledgeBase] Found {len(matching_listings)} service listings for capability '{capability_needed}'.", level="DEBUG")
+        return matching_listings
+    
     def get_size(self, lineage_id: Optional[str] = None) -> int:
         """Returns the number of items for a specific lineage or total items."""
         if lineage_id:

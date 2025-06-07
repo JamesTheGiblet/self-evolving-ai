@@ -91,6 +91,11 @@ class SkillAgent(BaseAgent):
         )
         self.skill_tool = skill_tool
         
+        # Initialize self.state if it doesn't exist (should be handled by BaseAgent, but good for safety)
+        if not hasattr(self, 'state') or self.state is None:
+            self.state = {}
+        self.state.setdefault('active_contracts', {})
+
         # Ensure self.memory is initialized for SkillAgent as well
         if not hasattr(self, 'memory') or self.memory is None:
              self.memory = AgentMemory(agent_id=self.id)
@@ -217,67 +222,6 @@ class SkillAgent(BaseAgent):
              log(f"[{self.name}] Cannot send response: invoking_agent_id ({invoking_agent_id}) or task_id ({task_id}) missing.", level="WARN")
 
         return final_response_to_task_agent
-
-    def _handle_message(self, sender_id: str, message_content: Dict[str, Any]) -> bool:
-        """
-        Handles a received message. Overrides BaseAgent to process skill requests.
-        Returns True if the message was handled by this method, False otherwise.
-        """
-        intended_skill_action_category = message_content.get('action')
-        request_id = message_content.get('request_id')
-        params_from_message = message_content.get('data', {})
-
-        # Check if this message is a skill execution request (sent by invoke_skill_agent_v1)
-        if intended_skill_action_category and request_id:
-            log(f"[{self.name}] Identified skill execution request from {sender_id} (ReqID: {request_id}): Intended Action Category '{intended_skill_action_category}'", level="INFO")
-
-            # Assumption: The invoking capability (e.g., invoke_skill_agent_v1)
-            # now places the exact command string for the skill_tool into
-            # params_from_message["tool_command_str"].
-            # The 'intended_skill_action_category' (message_content.get('action'))
-            # can still be used for high-level categorization or logging.
-
-            actual_command_for_tool = params_from_message.get("tool_command_str")
-
-            if not actual_command_for_tool:
-                # Fallback: if "tool_command_str" is not present, try to use the
-                # 'intended_skill_action_category' directly as the command.
-                # This maintains some backward compatibility or handles simpler invocations.
-                log(f"[{self.name}] 'tool_command_str' not found in message data. Using 'action' field ('{intended_skill_action_category}') as command for skill tool. Message data: {params_from_message}", level="DEBUG")
-                actual_command_for_tool = intended_skill_action_category
-                # If this fallback is used, params_from_message might contain arguments
-                # that the skill_tool needs to parse from the command string itself, or handle separately.
-                # This path requires skill_tools to be more complex in their parsing.
-
-            if actual_command_for_tool is None:
-                log(f"[{self.name}] Could not determine actual command for skill tool from message: {message_content}", level="WARN")
-                # Send a failure response back
-                error_response = {
-                    "status": "failure_bad_request",
-                    "message": "SkillAgent could not determine the command to execute.",
-                    "data": None,
-                    "error": "Malformed skill request.",
-                    "request_id": request_id # Include request_id in the payload
-                }
-                self.communication_bus.send_direct_message(self.name, sender_id, error_response)
-                # Note: We don't mark the message processed here; _process_communication does that after _handle_message returns.
-                return True # Indicate message was handled (as a bad request)
-
-            log(f"[{self.name}] Final command string for skill tool '{self.skill_tool.skill_name}': '{actual_command_for_tool}'", level="DEBUG")
-
-            # Execute the skill action. execute_skill_action now sends the response.
-            self.execute_skill_action(
-                skill_command_str=actual_command_for_tool,
-                params=params_from_message, # Pass the original 'data' payload for context/logging
-                invoking_agent_id=sender_id,
-                task_id=request_id
-            )
-            # Note: We don't mark the message processed here; _process_communication does that after _handle_message returns.
-            return True # Indicate message was handled (as a skill request)
-
-        # If it's not a skill request message, let the base class handle it.
-        # This is where generic broadcasts or other message types would be handled by BaseAgent.
-        return super()._handle_message(sender_id, message_content)
     
     def _evaluate_task_offer(self, proposed_terms: Dict[str, Any], capability_requested: str, tool_command_str: str) -> Dict[str, Any]:
         """
@@ -288,49 +232,69 @@ class SkillAgent(BaseAgent):
         # - Check if agent has enough energy for the potential cost.
         # - Check if the reward is positive.
         # - Check if the capability is something this agent can do.
+        # - If not acceptable, consider a counter-offer.
 
         # Cost to SkillAgent for executing the skill (internal estimate)
         estimated_internal_cost = self.get_estimated_cost() # This is cost per invocation, not per specific command yet
         
         # Max cost the TaskAgent is willing for the SkillAgent to charge it (this is different from internal cost)
-        # For now, let's assume the SkillAgent will charge what the TaskAgent is willing to pay if it's profitable.
-        max_chargeable_cost = proposed_terms.get("max_energy_cost_to_task_agent", 0.0)
-        proposed_reward = proposed_terms.get("reward_for_success", 0.0)
-
+        max_chargeable_cost_by_task_agent = proposed_terms.get("max_energy_cost_to_task_agent", 0.0)
+        proposed_reward_by_task_agent = proposed_terms.get("reward_for_success", 0.0)
+        
         # Profitability check (simplified)
         # If reward > internal_cost AND chargeable_cost >= internal_cost
         # This is a very basic model. A real model would consider opportunity cost, risk, etc.
-        is_profitable = (proposed_reward > estimated_internal_cost) and \
-                        (max_chargeable_cost >= estimated_internal_cost)
-
+        is_profitable = (proposed_reward_by_task_agent > estimated_internal_cost) and \
+                        (max_chargeable_cost_by_task_agent >= estimated_internal_cost)
+        
         can_perform_capability = capability_requested in self.capabilities # Check if the conceptual capability is offered
         # A more detailed check might involve validating the tool_command_str against the skill_tool
 
         if self.energy > estimated_internal_cost and is_profitable and can_perform_capability:
-            log(f"[{self.name}] Evaluating TASK_OFFER for '{capability_requested}': ACCEPTING. Proposed reward: {proposed_reward}, Max cost to task_agent: {max_chargeable_cost}, My estimated internal cost: {estimated_internal_cost}", level="INFO")
+            log(f"[{self.name}] Evaluating TASK_OFFER for '{capability_requested}': ACCEPTING. Proposed reward: {proposed_reward_by_task_agent}, Max cost to task_agent: {max_chargeable_cost_by_task_agent}, My estimated internal cost: {estimated_internal_cost}", level="INFO")
             return {
                 "response_type": "accept",
                 "actual_terms": { # SkillAgent confirms the terms it accepts
-                    "reward_for_success": proposed_reward,
-                    "energy_cost_charged_to_task_agent": min(max_chargeable_cost, estimated_internal_cost + (proposed_reward - estimated_internal_cost) * 0.1), # Charge a bit more than cost if profitable
+                    "reward_for_success": proposed_reward_by_task_agent,
+                    "energy_cost_charged_to_task_agent": min(max_chargeable_cost_by_task_agent, estimated_internal_cost + (proposed_reward_by_task_agent - estimated_internal_cost) * 0.1), # Charge a bit more than cost if profitable
                     "deadline_ticks": proposed_terms.get("deadline_ticks")
                 }
             }
         else:
+            # --- Attempt Counter-Offer Logic ---
+            # If capable and has energy, but offer wasn't profitable enough
+            if self.energy > estimated_internal_cost and can_perform_capability and not is_profitable:
+                # Try to make a counter-offer: ask for a bit more reward
+                # and propose to charge its internal cost if that's acceptable to the TaskAgent.
+                counter_reward = estimated_internal_cost + (self.base_tick_energy_cost * 2) # e.g., cost + 2 ticks profit
+                counter_cost_charged = estimated_internal_cost # Propose to charge its internal cost
+
+                # Only make counter-offer if it's better than original and within TaskAgent's max cost
+                if counter_reward > proposed_reward_by_task_agent and counter_cost_charged <= max_chargeable_cost_by_task_agent:
+                    log(f"[{self.name}] Evaluating TASK_OFFER for '{capability_requested}': COUNTER-OFFERING. Original Reward: {proposed_reward_by_task_agent}, Counter Reward: {counter_reward}. Original Max Cost: {max_chargeable_cost_by_task_agent}, Counter Cost Charged: {counter_cost_charged}", level="INFO")
+                    return {
+                        "response_type": "counter_offer",
+                        "counter_proposed_terms": {
+                            "reward_for_success": counter_reward,
+                            "energy_cost_charged_to_task_agent": counter_cost_charged,
+                            "deadline_ticks": proposed_terms.get("deadline_ticks") # Keep original deadline for now
+                        },
+                        "reason": "Original offer not sufficiently profitable."
+                    }
+
+            # --- Rejection Logic (if no acceptance or counter-offer) ---
             reason = ""
             if self.energy <= estimated_internal_cost: reason += "Insufficient energy. "
-            if not is_profitable: reason += "Offer not profitable. "
+            if not is_profitable and not (self.energy > estimated_internal_cost and can_perform_capability): # Avoid double-logging if counter was possible
+                reason += "Offer not profitable. "
             if not can_perform_capability: reason += f"Cannot perform '{capability_requested}'. "
+            if not reason: reason = "Offer terms not acceptable." # Generic fallback
+
             log(f"[{self.name}] Evaluating TASK_OFFER for '{capability_requested}': REJECTING. Reason: {reason.strip()}", level="INFO")
             return {
                 "response_type": "reject",
                 "reason": reason.strip()
             }
-
-    def _handle_message(self, sender_id: str, message_content: Dict[str, Any]) -> bool:
-        """Handles a received message. Overrides BaseAgent to process skill requests and task offers."""
-        message_type = message_content.get('type')
-        payload = message_content.get('payload', {})
 
     def get_config(self) -> dict:
         base_config = super().get_config()
@@ -405,6 +369,11 @@ class SkillAgent(BaseAgent):
         message_type = message_content.get('type')
         payload = message_content.get('payload', {})
 
+        # Initialize self.state if it doesn't exist (should be handled by BaseAgent, but good for safety)
+        if not hasattr(self, 'state') or self.state is None:
+            self.state = {}
+        self.state.setdefault('active_contracts', {})
+
         if message_type == "TASK_OFFER":
             negotiation_id = payload.get('negotiation_id')
             requester_agent_id = payload.get('requester_agent_id')
@@ -427,7 +396,8 @@ class SkillAgent(BaseAgent):
                     "negotiation_id": negotiation_id, # Echo back the ID
                     "responder_agent_id": self.id,
                     "response_type": evaluation_result["response_type"],
-                    "actual_terms": evaluation_result.get("actual_terms"),
+                    "actual_terms": evaluation_result.get("actual_terms"), # For 'accept'
+                    "counter_proposed_terms": evaluation_result.get("counter_proposed_terms"), # For 'counter_offer'
                     "reason": evaluation_result.get("reason")
                 },
                 "recipient_agent_id": requester_agent_id # Send back to original requester
@@ -435,6 +405,32 @@ class SkillAgent(BaseAgent):
             self.communication_bus.send_direct_message(self.name, requester_agent_id, response_message)
             log(f"[{self.name}] Sent TASK_OFFER_RESPONSE (NegID: {negotiation_id}) to '{requester_agent_id}'. Type: {evaluation_result['response_type']}", level="DEBUG")
             return True # Message handled
+        
+        elif message_type == "CONTRACT_AGREEMENT":
+            contract_id = payload.get('contract_id')
+            task_agent_id = payload.get('task_agent_id')
+            log(f"[{self.name}] Received CONTRACT_AGREEMENT (ID: {contract_id}) from TaskAgent '{task_agent_id}'.", level="INFO")
+
+            if not all([contract_id, task_agent_id, payload.get('agreed_terms')]):
+                log(f"[{self.name}] Invalid CONTRACT_AGREEMENT received, missing fields. Payload: {payload}", level="WARN")
+                # Optionally send a reject/error message
+                return True
+
+            # Store the contract details
+            self.state['active_contracts'][contract_id] = {
+                "task_agent_id": task_agent_id,
+                "capability_requested": payload.get('capability_requested'),
+                "tool_command_str": payload.get('tool_command_str'),
+                "agreed_terms": payload.get('agreed_terms'),
+                "status": "acknowledged", # Mark as acknowledged by SkillAgent
+                "received_at_tick": self.context_manager.get_tick()
+            }
+            
+            # Send CONTRACT_ACKNOWLEDGED back to TaskAgent
+            ack_message = {"type": "CONTRACT_ACKNOWLEDGED", "payload": {"contract_id": contract_id, "skill_agent_id": self.id, "status": "acknowledged"}}
+            self.communication_bus.send_direct_message(self.name, task_agent_id, ack_message)
+            log(f"[{self.name}] Sent CONTRACT_ACKNOWLEDGED for ContractID '{contract_id}' to '{task_agent_id}'.", level="INFO")
+            return True
 
         # Existing skill execution request handling
         intended_skill_action_category = message_content.get('action') # Used by older direct invocation
@@ -516,5 +512,8 @@ class SkillAgent(BaseAgent):
                 "timestamp": self.context_manager.get_tick() # For freshness
             }
         }
-        self.communication_bus.publish_message(self.name, advertisement_message) # MetaAgent or ServiceRegistry would listen
-        log(f"Agent {self.name} (ID: {self.id}) advertised services: {list(self.capabilities)}. Details: {service_details}", level="INFO")
+        if hasattr(self.communication_bus, 'publish_message'):
+            self.communication_bus.publish_message(self.name, advertisement_message) # MetaAgent or ServiceRegistry would listen
+            log(f"Agent {self.name} (ID: {self.id}) advertised services: {list(self.capabilities)}. Details: {service_details}", level="INFO")
+        else:
+            log(f"Agent {self.name} (ID: {self.id}) could not advertise services: 'publish_message' method not found on CommunicationBus. Advertisement: {advertisement_message}", level="WARN")

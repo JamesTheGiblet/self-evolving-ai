@@ -8,6 +8,8 @@ import copy
 import time
  
 class CommunicationBus:
+    META_AGENT_NAME = "MetaAgent"  # Default name for the MetaAgent
+
     def __init__(self, enable_logging: bool = False):
         """Initializes the communication bus with message queues for agents."""
         # Stores message envelopes: { 'id': str, 'sender': str, 'type': str, 'content': dict, 'timestamp': float, 'processed': bool }
@@ -128,3 +130,28 @@ class CommunicationBus:
     def get_all_agents(self) -> List[str]:
         """Returns list of all registered agents."""
         return list(self.registered_agents)
+
+    def publish_message(self, publisher_name: str, advertisement_content: Dict[str, Any]) -> None:
+        """
+        Publishes a message, typically a service advertisement, to a designated listener.
+        Currently, this directs the advertisement to the MetaAgent.
+
+        Args:
+            publisher_name (str): The name of the agent publishing the advertisement (e.g., a SkillAgent).
+            advertisement_content (Dict[str, Any]): The advertisement message, which should include
+                                                   a 'type' (e.g., "SERVICE_ADVERTISEMENT") and 'payload'.
+        """
+        # Ensure MetaAgent is registered to receive messages.
+        # MetaAgent should register itself upon its initialization.
+        self.register_agent(self.META_AGENT_NAME)
+
+        # The message being sent to MetaAgent is the advertisement_content itself.
+        # The sender for the direct message is the original publisher (e.g., a SkillAgent).
+        self.send_direct_message(
+            sender_name=publisher_name,
+            recipient_name=self.META_AGENT_NAME,
+            content=advertisement_content
+        )
+
+        if self.enable_logging:
+            log(f"[CommunicationBus] Agent '{publisher_name}' published service advertisement to '{self.META_AGENT_NAME}'. Services: {advertisement_content.get('payload', {}).get('services_offered', 'N/A')}", level="INFO")
