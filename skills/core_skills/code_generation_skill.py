@@ -1,8 +1,8 @@
 # c:/Users/gilbe/Desktop/self-evolving-ai/skills/core_skills/code_generation_skill.py
 from utils.logger import log
-from core.skill_interface import SkillInterface # Adjusted import path
+from skills.base_skill import BaseSkillTool # Import the correct base class
 
-class CodeGenerationSkill(SkillInterface):
+class CodeGenerationSkill(BaseSkillTool):
     def __init__(self, skill_config, knowledge_base, context_manager, communication_bus, agent_name, agent_id, code_gen_agent):
         super().__init__(skill_config, knowledge_base, context_manager, communication_bus, agent_name, agent_id)
         self.code_gen_agent = code_gen_agent
