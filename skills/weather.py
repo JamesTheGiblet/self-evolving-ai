@@ -1,8 +1,14 @@
 # skills / weather.py
 
-from typing import Dict, Any
+from typing import Dict, Any, TYPE_CHECKING
 from .base_skill import BaseSkillTool # Import BaseSkillTool
 from utils.logger import log # Assuming logger is needed
+
+# For type hinting core components to avoid circular imports at runtime
+if TYPE_CHECKING:
+    from memory.knowledge_base import KnowledgeBase
+    from core.context_manager import ContextManager
+    from engine.communication_bus import CommunicationBus
 
 def _get_current_weather(location: str) -> dict:
     """Placeholder function to simulate fetching weather data."""
@@ -10,8 +16,27 @@ def _get_current_weather(location: str) -> dict:
     return {"location": location, "temperature": "22C", "condition": "Sunny"}
 
 class Weather(BaseSkillTool):
-    def __init__(self):
-        super().__init__(skill_name="Weather")
+    def __init__(self,
+                 skill_config: Dict[str, Any],
+                 knowledge_base: 'KnowledgeBase',
+                 context_manager: 'ContextManager',
+                 communication_bus: 'CommunicationBus',
+                 agent_name: str,
+                 agent_id: str,
+                 **kwargs: Any):
+        """
+        Initializes the Weather skill.
+
+        Args:
+            skill_config (dict): Configuration specific to this skill instance.
+            knowledge_base (KnowledgeBase): Instance of the knowledge base.
+            context_manager (ContextManager): Instance of the context manager.
+            communication_bus (CommunicationBus): Instance of the communication bus.
+            agent_name (str): Name of the agent this skill is associated with.
+            agent_id (str): ID of the agent this skill is associated with.
+        """
+        super().__init__(skill_config, knowledge_base, context_manager, communication_bus, agent_name, agent_id, **kwargs)
+        log(f"[{self.skill_name}] Initialized for agent {agent_name} ({agent_id}).", level="INFO")
 
     def get_capabilities(self) -> Dict[str, Any]:
         return {

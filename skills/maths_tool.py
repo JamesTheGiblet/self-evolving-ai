@@ -1,9 +1,15 @@
 # skills / maths_tool.py
 
 import math 
-from typing import Dict, Any # Added Any for memory type hint
+from typing import Dict, Any, TYPE_CHECKING # Added TYPE_CHECKING
 from .base_skill import BaseSkillTool # Import BaseSkillTool
 from utils.logger import log # Assuming logger is needed
+
+# For type hinting core components to avoid circular imports at runtime
+if TYPE_CHECKING:
+    from memory.knowledge_base import KnowledgeBase
+    from core.context_manager import ContextManager
+    from engine.communication_bus import CommunicationBus
 
 # Helper functions (mostly remain the same, ensure they raise ValueErrors for invalid input)
 def _add(a: float, b: float) -> float:
@@ -37,8 +43,26 @@ def _cos(angle_degrees: float) -> float:
     return math.cos(math.radians(angle_degrees))
 
 class MathsTool(BaseSkillTool):
-    def __init__(self):
-        super().__init__(skill_name="MathsTool")
+    def __init__(self,
+                 skill_config: Dict[str, Any],
+                 knowledge_base: 'KnowledgeBase',
+                 context_manager: 'ContextManager',
+                 communication_bus: 'CommunicationBus',
+                 agent_name: str,
+                 agent_id: str,
+                 **kwargs: Any):
+        """
+        Initializes the MathsTool skill.
+
+        Args:
+            skill_config (dict): Configuration specific to this skill instance.
+            knowledge_base (KnowledgeBase): Instance of the knowledge base.
+            context_manager (ContextManager): Instance of the context manager.
+            communication_bus (CommunicationBus): Instance of the communication bus.
+            agent_name (str): Name of the agent this skill is associated with.
+            agent_id (str): ID of the agent this skill is associated with.
+        """
+        super().__init__(skill_config, knowledge_base, context_manager, communication_bus, agent_name, agent_id, **kwargs)
         # Define a dictionary of operations that take 2 arguments
         self.two_arg_ops = {
             "add": _add,
@@ -54,6 +78,7 @@ class MathsTool(BaseSkillTool):
             "cos": _cos
             # Add other unary ops like "sqrt", "abs" etc.
         }
+        log(f"[{self.skill_name}] Initialized for agent {agent_name} ({agent_id}).", level="INFO")
 
     def get_capabilities(self) -> Dict[str, Any]:
         return {

@@ -4,20 +4,39 @@ import json
 import statistics
 from collections import Counter
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, TYPE_CHECKING
 from skills.base_skill import BaseSkillTool
 from utils.logger import log
 from utils.data_extraction import _extract_data_recursively # Assuming this utility is available
 from core.constants import DEFAULT_STOP_WORDS # Assuming this utility is available
 
+# For type hinting core components to avoid circular imports at runtime
+if TYPE_CHECKING:
+    from memory.knowledge_base import KnowledgeBase
+    from core.context_manager import ContextManager
+    from engine.communication_bus import CommunicationBus
+
 class DataAnalysisSkillTool(BaseSkillTool): # Inherits from BaseSkillTool
-    skill_name: str = "DataAnalysis"
+    # skill_name will be set by BaseSkillTool based on skill_config['skill_class_name']
+    # This class attribute can serve as a default or for reference if needed.
+    # skill_name_override: str = "DataAnalysis" 
     skill_description: str = "Performs various data analysis tasks like summarization, statistics, and pattern matching."
 
-    def __init__(self, *args, **kwargs):
-        # Ensure the skill_name class attribute is passed to the BaseSkillTool's constructor.
-        # Any other arguments passed by skill_loader during instantiation will be handled by *args, **kwargs.
-        super().__init__(skill_name=self.skill_name, *args, **kwargs)
+    def __init__(self, 
+                 skill_config: Dict[str, Any], 
+                 knowledge_base: 'KnowledgeBase', 
+                 context_manager: 'ContextManager', 
+                 communication_bus: 'CommunicationBus', 
+                 agent_name: str, 
+                 agent_id: str, 
+                 **kwargs: Any): # To catch any other args passed by skill_loader
+        """
+        Initializes the DataAnalysisSkillTool.
+        The actual self.skill_name will be set by the BaseSkillTool's constructor
+        based on the skill_config (usually the class name).
+        """
+        super().__init__(skill_config, knowledge_base, context_manager, communication_bus, agent_name, agent_id, **kwargs)
+        log(f"[{self.skill_name}] Initialized for agent {agent_name} ({agent_id}).", level="INFO")
 
 
     def get_capabilities(self) -> dict:
@@ -63,10 +82,23 @@ class DataAnalysisSkillTool(BaseSkillTool): # Inherits from BaseSkillTool
             }
         }
 
-    def execute(self, command_str: str) -> Dict[str, Any]:
-        log(f"[{self.skill_name}] Received command_str: {command_str[:200]}...", level="DEBUG")
+    def _execute_skill(self, args: List[str]) -> Dict[str, Any]:
+        """
+        Executes data analysis based on parsed arguments.
+        Expects args[0] to be the analysis_type (command) and args[1] to be the JSON payload string.
+        """
+        log(f"[{self.skill_name}] Received args for _execute_skill: {args}", level="DEBUG")
+
+        if not args or len(args) < 1: # Changed to < 1, as command_str itself might be the JSON
+            return self._build_response_dict(success=False, error="No command or JSON payload provided to DataAnalysisSkillTool.")
+
+        # If the command_str from BaseSkillTool.execute() is directly the JSON payload
+        # because TaskRouter/MetaAgent decided to pass it as such for this specific skill.
+        # Or, if args[0] is a command like "log_summary" and args[1] is the JSON payload.
+        json_payload_str = args[0] if len(args) == 1 else (args[1] if len(args) > 1 else "{}")
+
         try:
-            payload = json.loads(command_str)
+            payload = json.loads(json_payload_str)
             analysis_type = payload.get("analysis_type")
             data_points = payload.get("data_points", []) # Default for most types
 
@@ -118,8 +150,8 @@ class DataAnalysisSkillTool(BaseSkillTool): # Inherits from BaseSkillTool
                 return self._build_response_dict(success=False, data=result_data, error=f"Analysis type '{analysis_type}' recognized but not fully implemented by DataAnalysisSkillTool.")
 
         except json.JSONDecodeError as e:
-            log(f"[{self.skill_name}] Error decoding JSON command: {e}. Command: {command_str}", level="ERROR")
+            log(f"[{self.skill_name}] Error decoding JSON payload: {e}. Payload string: {json_payload_str}", level="ERROR")
             return self._build_response_dict(success=False, error=f"Invalid JSON in command: {e}")
         except Exception as e:
-            log(f"[{self.skill_name}] Error executing command '{command_str[:50]}...': {e}", level="ERROR", exc_info=True)
+            log(f"[{self.skill_name}] Error executing data analysis with payload '{json_payload_str[:50]}...': {e}", level="ERROR", exc_info=True)
             return self._build_response_dict(success=False, error=f"Execution error: {e}")

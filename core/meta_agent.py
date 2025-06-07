@@ -54,12 +54,30 @@ class MetaAgent:
         # Store default skill configurations in a dictionary for easy lookup by lineage_id.
         # These default_skill_agent_configs from main.py contain the actual skill_tool instances.
         self.default_skill_configs_by_lineage: Dict[str, Dict[str, Any]] = {}
-        for cfg in default_skill_agent_configs:
-            lineage = cfg.get("lineage_id")
+        for cfg_item in default_skill_agent_configs: # Renamed cfg to cfg_item for clarity
+            lineage = cfg_item.get("lineage_id")
             if lineage:
-                self.default_skill_configs_by_lineage[lineage] = copy.deepcopy(cfg) 
+                # Original problematic line:
+                # self.default_skill_configs_by_lineage[lineage] = copy.deepcopy(cfg_item)
+                
+                # Create a new dictionary, selectively deepcopying items.
+                # The 'skill_tool' instance itself will not be deepcopied to avoid pickling errors
+                # with objects like thread locks held by shared components (KB, CommBus, ContextManager).
+                new_config_for_lineage = {}
+                skill_tool_instance_to_preserve = None
+
+                for key, value in cfg_item.items():
+                    if key == "skill_tool":
+                        skill_tool_instance_to_preserve = value # Preserve the original instance
+                    else:
+                        new_config_for_lineage[key] = copy.deepcopy(value) # Deepcopy other items
+                
+                if skill_tool_instance_to_preserve is not None: # Should always be true if cfg_item is valid
+                    new_config_for_lineage["skill_tool"] = skill_tool_instance_to_preserve
+                
+                self.default_skill_configs_by_lineage[lineage] = new_config_for_lineage
             else:
-                log(f"MetaAgent Init: Default skill config missing 'lineage_id'. Config: {cfg}", level="WARN")
+                log(f"MetaAgent Init: Default skill config missing 'lineage_id'. Config: {cfg_item}", level="WARN")
 
         self.task_router: Optional['TaskRouter'] = None
         log(f"MetaAgent initialized. Initial skill agents: {len(self.skill_agents)}. Default skill configs by lineage: {len(self.default_skill_configs_by_lineage)}.", level="INFO")

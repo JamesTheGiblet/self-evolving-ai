@@ -18,9 +18,30 @@ def _validate_date(date_str: str) -> bool:
         return False
 
 class Calendar(BaseSkillTool):
-    def __init__(self, memory_store: dict): # Calendar now requires a memory store
-        super().__init__(skill_name="Calendar")
+    def __init__(self, 
+                 skill_config: Dict[str, Any], 
+                 knowledge_base: Any, # Use 'KnowledgeBase' from TYPE_CHECKING if available
+                 context_manager: Any, # Use 'ContextManager' from TYPE_CHECKING if available
+                 communication_bus: Any, # Use 'CommunicationBus' from TYPE_CHECKING if available
+                 agent_name: str, 
+                 agent_id: str, 
+                 memory_store: dict, # Specific dependency for Calendar
+                 **kwargs: Any): # To catch any other args passed by skill_loader
+        """
+        Initializes the Calendar skill.
+
+        Args:
+            skill_config (dict): Configuration specific to this skill instance.
+            knowledge_base: Instance of the knowledge base.
+            context_manager: Instance of the context manager.
+            communication_bus: Instance of the communication bus.
+            agent_name (str): Name of the agent this skill is associated with.
+            agent_id (str): ID of the agent this skill is associated with.
+            memory_store (dict): A dictionary-like object for storing calendar events.
+        """
+        super().__init__(skill_config, knowledge_base, context_manager, communication_bus, agent_name, agent_id, **kwargs)
         self.memory_store = memory_store # Store the shared memory object
+        log(f"[{self.skill_name}] Initialized for agent {agent_name} ({agent_id}) with memory_store.", level="INFO")
 
     def _add_calendar_event(self, event_name: str, event_date: str) -> dict:
         """Adds an event to the in-memory calendar using self.memory_store."""
@@ -103,7 +124,7 @@ class Calendar(BaseSkillTool):
         Executes calendar operations based on parsed arguments.
         Uses self.memory_store for event storage.
         """
-        log.info(f"[{self.skill_name}] Executing with args: {args}")
+        log(f"[{self.skill_name}] Executing with args: {args}", level="INFO")
         command_str_for_logging = " ".join(args)
 
         if not args:
@@ -144,5 +165,5 @@ class Calendar(BaseSkillTool):
             else:
                 return self._build_response_dict(success=False, error=f"Unknown command '{command}'. Supported: 'current_date', 'add_event', 'list_events', 'list_all_events', 'remove_event'.")
         except Exception as e:
-            log.error(f"[{self.skill_name}] Error during calendar operation '{command_str_for_logging}': {e}", exc_info=True)
+            log(f"[{self.skill_name}] Error during calendar operation '{command_str_for_logging}': {e}", level="ERROR", exc_info=True)
             return self._build_response_dict(success=False, error=f"An unexpected error occurred: {str(e)}", data={"input_command": command_str_for_logging})

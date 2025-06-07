@@ -1,14 +1,40 @@
 # c:/Users/gilbe/Desktop/self-evolving-ai/skills/web_scraper.py
+
 import json
-from typing import Any, Dict
+from typing import Any, Dict, TYPE_CHECKING
 from skills.base_skill import BaseSkillTool # This import is now correct
 from utils.logger import log
 # Assume you have some actual web scraping libraries or functions
 # from some_web_library import scrape_url_content # Example
 
+# For type hinting core components to avoid circular imports at runtime
+if TYPE_CHECKING:
+    from memory.knowledge_base import KnowledgeBase
+    from core.context_manager import ContextManager
+    from engine.communication_bus import CommunicationBus
+
 class WebScraper(BaseSkillTool):
-    def __init__(self): # Add __init__
-        super().__init__(skill_name="WebScraper") # Call super
+    def __init__(self,
+                 skill_config: Dict[str, Any],
+                 knowledge_base: 'KnowledgeBase',
+                 context_manager: 'ContextManager',
+                 communication_bus: 'CommunicationBus',
+                 agent_name: str,
+                 agent_id: str,
+                 **kwargs: Any):
+        """
+        Initializes the WebScraper skill.
+
+        Args:
+            skill_config (dict): Configuration specific to this skill instance.
+            knowledge_base (KnowledgeBase): Instance of the knowledge base.
+            context_manager (ContextManager): Instance of the context manager.
+            communication_bus (CommunicationBus): Instance of the communication bus.
+            agent_name (str): Name of the agent this skill is associated with.
+            agent_id (str): ID of the agent this skill is associated with.
+        """
+        super().__init__(skill_config, knowledge_base, context_manager, communication_bus, agent_name, agent_id, **kwargs)
+        log(f"[{self.skill_name}] Initialized for agent {agent_name} ({agent_id}).", level="INFO")
 
     def get_capabilities(self) -> Dict[str, Any]:
         return {

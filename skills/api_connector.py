@@ -57,8 +57,31 @@ def _fetch_from_api(url: str, params: Dict = None, headers: Dict = None) -> tupl
         return None, f"Failed to decode JSON response from '{url}': {str(e)}. Response text preview: {response_text_preview}"
 
 class ApiConnector(BaseSkillTool): # Inherit from BaseSkillTool
-    def __init__(self):
-        super().__init__(skill_name="ApiConnector") # Call super with skill_name
+    def __init__(self, skill_config, knowledge_base, context_manager, communication_bus, agent_name, agent_id):
+        """
+        Initializes the ApiConnector skill.
+
+        Args:
+            skill_config (dict): Configuration specific to this skill instance.
+            knowledge_base (KnowledgeBase): Instance of the knowledge base.
+            context_manager (ContextManager): Instance of the context manager.
+            communication_bus (CommunicationBus): Instance of the communication bus.
+            agent_name (str): Name of the agent this skill is associated with.
+            agent_id (str): ID of the agent this skill is associated with.
+        """
+        super().__init__(
+            skill_config=skill_config,
+            knowledge_base=knowledge_base,
+            context_manager=context_manager,
+            communication_bus=communication_bus,
+            agent_name=agent_name,
+            agent_id=agent_id
+            # If ApiConnector had its own **kwargs to pass up, they would go here.
+            # Currently, BaseSkillTool's **kwargs catches extras from skill_loader.
+        )
+        # You can store these arguments as instance variables if ApiConnector needs them later.
+        # For example: self.skill_config = skill_config
+        log(f"[{self.skill_name}] Initialized for agent {agent_name} ({agent_id}).", level="INFO")
 
     def get_capabilities(self) -> Dict[str, Any]:
         return {

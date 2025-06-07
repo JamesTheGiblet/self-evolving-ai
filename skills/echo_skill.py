@@ -1,29 +1,45 @@
 # c:\Users\gilbe\Desktop\self-evolving-ai\skills\echo_skill.py
 import json
-from typing import List, Dict, Any
+from typing import List, Dict, Any, TYPE_CHECKING
 from skills.base_skill import BaseSkillTool # Assuming this is the correct path to your BaseSkillTool
 from utils.logger import log
+
+# For type hinting core components to avoid circular imports at runtime
+if TYPE_CHECKING:
+    from memory.knowledge_base import KnowledgeBase
+    from core.context_manager import ContextManager
+    from engine.communication_bus import CommunicationBus
 
 class EchoSkill(BaseSkillTool):
     """
     A simple skill that echoes back the provided input.
     """
-    def __init__(self, knowledge_base=None, context_manager=None, communication_bus=None):
-        # Define skill_name before calling super().__init__
-        self.skill_name = "EchoSkill" 
-        super().__init__(skill_name=self.skill_name) # Pass skill_name to BaseSkillTool
-        
-        # If EchoSkill (or other skills) need these instances for their own logic,
-        # they should be stored as instance attributes here.
-        # self.knowledge_base = knowledge_base
-        # self.context_manager = context_manager
-        # self.communication_bus = communication_bus
-        
+    def __init__(self,
+                 skill_config: Dict[str, Any],
+                 knowledge_base: 'KnowledgeBase',
+                 context_manager: 'ContextManager',
+                 communication_bus: 'CommunicationBus',
+                 agent_name: str,
+                 agent_id: str,
+                 **kwargs: Any):
+        """
+        Initializes the EchoSkill.
+
+        Args:
+            skill_config (dict): Configuration specific to this skill instance.
+            knowledge_base (KnowledgeBase): Instance of the knowledge base.
+            context_manager (ContextManager): Instance of the context manager.
+            communication_bus (CommunicationBus): Instance of the communication bus.
+            agent_name (str): Name of the agent this skill is associated with.
+            agent_id (str): ID of the agent this skill is associated with.
+        """
+        super().__init__(skill_config, knowledge_base, context_manager, communication_bus, agent_name, agent_id, **kwargs)
+        # self.skill_name is now set by BaseSkillTool based on skill_config.
         self.description = "Echoes back the input string."
         self.commands = {
             "echo": self.echo_command
         }
-        log(f"[{self.skill_name}] Skill initialized.", level="INFO")
+        log(f"[{self.skill_name}] Skill initialized for agent {agent_name} ({agent_id}).", level="INFO")
 
     def get_capabilities(self) -> Dict[str, Any]:
         """
