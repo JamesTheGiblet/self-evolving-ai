@@ -2,7 +2,7 @@
 
 import json
 import datetime
-from typing import Dict, Any, List, TYPE_CHECKING
+from typing import Dict, Any, List, TYPE_CHECKING, Optional
 
 from skills.base_skill import BaseSkillTool
 from utils.logger import log
