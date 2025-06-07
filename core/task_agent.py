@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from engine.communication_bus import CommunicationBus
     from core.capability_input_preparer import CapabilityInputPreparer
     from memory.agent_memory import AgentMemory
+    from agents.code_gen_agent import LLMInterface # Added for LLM capabilities
 
 CapabilityParamsType = Optional[Dict[str, Dict]]
 CapabilitiesType = Optional[List[str]]
@@ -54,7 +55,8 @@ class TaskAgent(BaseAgent):
                  generic_task_failure_rate: float = 0.1,
                  llm_model_name: str = config.DEFAULT_LLM_MODEL
                  , agent_type: Optional[str] = None, # Added to accept from config unpacking
-                 identity_engine: Optional['IdentityEngine'] = None # Added
+                 identity_engine: Optional['IdentityEngine'] = None, # Added
+                 llm_interface: Optional['LLMInterface'] = None, # Added for LLM capabilities
                 ):
 
         resolved_initial_energy = config.DEFAULT_INITIAL_ENERGY
@@ -105,6 +107,7 @@ class TaskAgent(BaseAgent):
         self.symptom_investigation_priority = symptom_investigation_priority
         self.generic_task_failure_rate = generic_task_failure_rate
         self.llm_model_name = llm_model_name
+        self.llm_interface = llm_interface # Store the LLM interface
         self.complex_goal_completion_reward = 2.0
         self.energy_efficiency_bonus_factor = 0.5
         self.pending_delayed_rewards: List[Dict[str, Any]] = []
@@ -146,30 +149,29 @@ class TaskAgent(BaseAgent):
                 "agreed_terms": agreed_terms,
                 "success_conditions": "SkillAgent reports success_skill_execution.", # Placeholder
                 "failure_conditions": "SkillAgent reports failure or timeout."     # Placeholder
-            },
-            "recipient_agent_id": skill_agent_id
+            }
+            # Removed recipient_agent_id from here, send_direct_message takes it as a param
         }
 
-        success = self.communication_bus.send_direct_message(
-            sender_id=self.name,
-            recipient_id=skill_agent_id,
-            message_content=contract_agreement_message
+        # Corrected call to send_direct_message
+        self.communication_bus.send_direct_message(
+            sender_name=self.name, # Use sender_name
+            recipient_name=skill_agent_id, # Use recipient_name
+            content=contract_agreement_message # Use content
         )
 
-        if success:
-            self.state['pending_contract_acknowledgements'][contract_id] = {
-                "skill_agent_id": skill_agent_id,
-                "capability_requested": capability_requested,
-                "tool_command_str": tool_command_str,
-                "agreed_terms": agreed_terms,
-                "status": "agreement_sent",
-                "sent_at_tick": self.context_manager.get_tick(),
-                "original_invoking_capability_request_id": self.state['pending_negotiations'][negotiation_id].get("original_invoking_capability_request_id")
-            }
-            log(f"[{self.name}] Sent CONTRACT_AGREEMENT (ID: {contract_id}) to '{skill_agent_id}'. Terms: {agreed_terms}", level="INFO")
-        else:
-            log(f"[{self.name}] Failed to send CONTRACT_AGREEMENT (ID: {contract_id}) to '{skill_agent_id}'.", level="ERROR")
-            # Potentially revert negotiation status or retry
+        # Assuming success for now, as send_direct_message doesn't return status in current stub
+        self.state['pending_contract_acknowledgements'][contract_id] = {
+            "skill_agent_id": skill_agent_id,
+            "capability_requested": capability_requested,
+            "tool_command_str": tool_command_str,
+            "agreed_terms": agreed_terms,
+            "status": "agreement_sent",
+            "sent_at_tick": self.context_manager.get_tick(),
+            "original_invoking_capability_request_id": self.state['pending_negotiations'][negotiation_id].get("original_invoking_capability_request_id")
+        }
+        log(f"[{self.name}] Sent CONTRACT_AGREEMENT (ID: {contract_id}) to '{skill_agent_id}'. Terms: {agreed_terms}", level="INFO")
+
 
         # --- Query KnowledgeBase for service listings ---
         # skill_action_to_request is the conceptual capability, e.g., "maths_operation"
@@ -272,32 +274,29 @@ class TaskAgent(BaseAgent):
                 "capability_requested": capability_name_requested, # The conceptual capability
                 "tool_command_str": tool_command_str_for_skill,   # The specific command for the tool
                 "proposed_terms": proposed_terms
-            },
-            "recipient_agent_id": target_skill_agent_id
+            }
+            # Removed recipient_agent_id from here
         }
 
-        success = self.communication_bus.send_direct_message(
-            sender_id=self.name, # TaskAgent's name
-            recipient_id=target_skill_agent_id,
-            message_content=task_offer_message
+        # Corrected call to send_direct_message
+        self.communication_bus.send_direct_message(
+            sender_name=self.name, # Use sender_name
+            recipient_name=target_skill_agent_id, # Use recipient_name
+            content=task_offer_message # Use content
         )
-
-        if success:
-            self.state['pending_negotiations'][negotiation_id] = {
-                "target_skill_agent_id": target_skill_agent_id,
-                "capability_requested": capability_name_requested,
-                "tool_command_str": tool_command_str_for_skill,
-                "proposed_terms": proposed_terms,
-                "status": "offer_sent",
-                "sent_at_tick": current_tick,
-                "original_invoking_capability_request_id": original_invoking_capability_request_id, # To link back
-                "timeout_at_tick": current_tick + deadline_ticks_from_now + 10 # Offer response timeout
-            }
-            log(f"[{self.name}] Sent TASK_OFFER (NegID: {negotiation_id}) for '{capability_name_requested}' to '{target_skill_agent_id}'. Proposed terms: {proposed_terms}", level="INFO")
-            return negotiation_id
-        else:
-            log(f"[{self.name}] Failed to send TASK_OFFER (NegID: {negotiation_id}) for '{capability_name_requested}' to '{target_skill_agent_id}'.", level="ERROR")
-            return None
+        # Assuming success for now
+        self.state['pending_negotiations'][negotiation_id] = {
+            "target_skill_agent_id": target_skill_agent_id,
+            "capability_requested": capability_name_requested,
+            "tool_command_str": tool_command_str_for_skill,
+            "proposed_terms": proposed_terms,
+            "status": "offer_sent",
+            "sent_at_tick": current_tick,
+            "original_invoking_capability_request_id": original_invoking_capability_request_id, # To link back
+            "timeout_at_tick": current_tick + deadline_ticks_from_now + 10 # Offer response timeout
+        }
+        log(f"[{self.name}] Sent TASK_OFFER (NegID: {negotiation_id}) for '{capability_name_requested}' to '{target_skill_agent_id}'. Proposed terms: {proposed_terms}", level="INFO")
+        return negotiation_id
 
 
     def _report_symptom(self, symptom_type: str, details_dict: Dict[str, Any], severity: str = "warning", symptom_id_prefix: str = "symptom"):
@@ -314,20 +313,20 @@ class TaskAgent(BaseAgent):
             "source_agent_name": self.name,
             "details": details_dict,
             "related_data_refs": [],
-            "event_type": "symptom_report",
+            "event_type": "symptom_report", # Ensure this is set for KB queries
             "lineage_id": self.lineage_id
         }
-        contribution_score = self.knowledge_base.store(
-            lineage_id=self.lineage_id,
-            storing_agent_name=self.name,
-            item=symptom_data,
-            tick=current_tick
+        # Use store_system_event for symptoms as they are system-relevant events
+        self.knowledge_base.store_system_event(
+            event_type="symptom_report", # Consistent event_type
+            event_details=symptom_data, # Pass the whole symptom_data as details
+            source_agent_id=self.id,
+            related_agent_ids=[self.id] # Or other relevant agents if applicable
         )
-        self.memory.log_knowledge_contribution(contribution_score)
         self.memory.log_tick({
             "action": "reported_symptom",
             "symptom_data": symptom_data,
-            "kb_contribution": contribution_score,
+            "kb_contribution": 0.0, # store_system_event doesn't return contribution score directly
             "tick": current_tick
         })
         log(f"[{self.name}] Reported symptom '{symptom_id}' (Type: {symptom_type}, Severity: {severity})", level="INFO")
@@ -340,22 +339,25 @@ class TaskAgent(BaseAgent):
 
         query_criteria = goal_details.get("criteria", {"data_matches": {"event_type": "symptom_report"}})
         
-        symptoms_found = self.knowledge_base.retrieve_full_entries(
-            lineage_id=self.lineage_id,
-            query_params=query_criteria,
-            current_tick=current_tick
+        # Querying for system events of type "symptom_report"
+        symptoms_found_events = self.knowledge_base.query_system_events(
+            event_type_filter="symptom_report",
+            # Add other filters if needed, e.g., source_agent_id_filter=self.id for self-reported
+            limit=10 # Limit the number of symptoms to investigate per cycle
         )
 
-        if not symptoms_found:
+        if not symptoms_found_events:
             log(f"[{self.name}] No symptoms found matching criteria: {query_criteria}", level="INFO")
             self.memory.log_tick({"action": "symptom_investigation_complete", "status": "no_symptoms_found", "tick": current_tick})
             return
 
-        log(f"[{self.name}] Found {len(symptoms_found)} symptoms to investigate.", level="INFO")
+        log(f"[{self.name}] Found {len(symptoms_found_events)} symptoms to investigate.", level="INFO")
 
-        for symptom_entry in symptoms_found:
-            symptom_data = symptom_entry.get("data", {})
-            if not symptom_data or symptom_data.get("event_type") != "symptom_report":
+        for event_entry in symptoms_found_events:
+            # The actual symptom_data is within event_entry['details']
+            symptom_data = event_entry.get("details", {}) 
+            if not symptom_data or symptom_data.get("type") is None: # Check for 'type' within symptom_data
+                log(f"[{self.name}] Skipping event entry due to missing symptom data or type: {event_entry}", level="DEBUG")
                 continue
 
             log(f"[{self.name}] Investigating symptom: {symptom_data.get('details', {}).get('description','N/A')} from {symptom_data.get('source_agent_name')}", level="DEBUG")
@@ -370,7 +372,7 @@ class TaskAgent(BaseAgent):
                 log(f"[{self.name}] Attempting to use 'triangulated_insight_v1' for symptom: {symptom_data.get('symptom_id')}", level="INFO")
                 
                 insight_cap_inputs = {
-                    "symptom_data": symptom_data,
+                    "symptom_data": symptom_data, # Pass the extracted symptom_data
                 }
 
                 # all_agents_list is now self.all_agent_names_in_system_cache
@@ -381,12 +383,14 @@ class TaskAgent(BaseAgent):
                     self.all_agent_names_in_system_cache,
                     **insight_cap_inputs
                 )
-                log(f"[{self.name}] 'triangulated_insight_v1' result: {insight_result.get('outcome')}. Details: {insight_result.get('details')}", level="INFO")
+                log(f"[{self.name}] 'triangulated_insight_v1' result: {insight_result.get('outcome')}. Details: {insight_result.get('best_insight')}", level="INFO")
                 
-                if "diagnosis" in insight_result and insight_result["diagnosis"]:
-                    self.last_diagnosis = insight_result["diagnosis"]
-                    log(f"[{self.name}] Stored diagnosis: {self.last_diagnosis.get('diagnosis_id')}")
-        self.memory.log_tick({"action": "symptom_investigation_complete", "status": "processed_symptoms", "symptoms_count": len(symptoms_found), "tick": current_tick})
+                # The insight handler now stores the best insight in KB and GUI.
+                # We can check if an insight was generated.
+                if insight_result.get("best_insight"):
+                    self.last_diagnosis = insight_result["best_insight"] # Store the best insight as last_diagnosis
+                    log(f"[{self.name}] Stored diagnosis: {self.last_diagnosis.get('root_cause_hypothesis')}")
+        self.memory.log_tick({"action": "symptom_investigation_complete", "status": "processed_symptoms", "symptoms_count": len(symptoms_found_events), "tick": current_tick})
         log(f"[{self.name}] Finished symptom investigation cycle.", level="INFO")
 
 
@@ -446,8 +450,9 @@ class TaskAgent(BaseAgent):
                     "confidence": 0.95,
                     "suggested_actions": ["LLM Interpretation"]
                 }
-                if self.context_manager and hasattr(self.context_manager, 'display_insight_in_gui'):
-                    self.context_manager.display_insight_in_gui(ack_insight)
+                # Corrected method name for displaying insight
+                if self.context_manager and hasattr(self.context_manager, 'post_insight_to_gui'):
+                    self.context_manager.post_insight_to_gui(ack_insight)
 
                 if self.has_capability("interpret_goal_with_llm_v1"):
                     initial_rl_state_for_interpret = self._get_rl_state_representation() # Get state before execution
@@ -458,8 +463,8 @@ class TaskAgent(BaseAgent):
                             "available_capabilities": self.capabilities,
                             "agent_name": self.name
                         },
-                        "llm_provider": "openai", 
-                        "llm_model": "gpt-3.5-turbo" if self.llm_model_name == config.DEFAULT_LLM_MODEL else self.llm_model_name
+                        "llm_provider": "local_ollama", # Example, can be configured
+                        "llm_model": self.llm_model_name
                     }
                     interpretation_result = self._execute_capability(
                         "interpret_goal_with_llm_v1",
@@ -486,9 +491,9 @@ class TaskAgent(BaseAgent):
                                     "type": "execute_llm_generated_plan",
                                     "details": {"plan_to_execute": parsed_action_details, "original_user_query": goal_description}
                                 })
-                            else:
+                            else: # If it's a dict but not 'invoke_skill', or other unhandled structure
                                 log(f"[{self.name}] LLM interpretation result type '{parsed_action_details.get('type')}' or structure not directly actionable for new goal. Setting to idle. Details: {parsed_action_details}", level="WARN")
-                            self.current_goal = {"type": "idle", "reason": "llm_interpretation_unhandled_type"}
+                                self.current_goal = {"type": "idle", "reason": "llm_interpretation_unhandled_type"}
                     elif interpretation_result.get("outcome") == "pending_llm_interpretation":
                         log(f"[{self.name}] LLM interpretation for user goal is pending. Request ID: {interpretation_result.get('details', {}).get('request_id')}")
                         # Goal remains 'user_defined_goal' or 'interpret_user_goal', pending LLM response.
@@ -586,7 +591,7 @@ class TaskAgent(BaseAgent):
             "alpha": self.rl_system.alpha,
             "gamma": self.rl_system.gamma,
             "epsilon": self.rl_system.epsilon,
-            "initial_energy_config": self.initial_energy
+            "initial_energy_config": self.initial_energy # This might be redundant if initial_energy in base_config is current
         })
         return agent_config
 
@@ -632,34 +637,36 @@ class TaskAgent(BaseAgent):
                 reward_to_apply = req_details["failure_reward"]
                 is_success = False
 
-                operational_status = skill_operation_data.get("status", "success") 
+                # Check the 'status' from the SkillAgent's response payload, not just the outer message status
+                skill_reported_status = response_content.get("status", "failure_unknown_response_format")
 
-                if "success" in status.lower() and "success" in operational_status.lower():
+                if "success" in skill_reported_status.lower(): # Check the skill's own reported status
                     reward_to_apply = req_details["success_reward"]
                     is_success = True
 
                     # --- Add Inter-Agent Payment Logic ---
-                    # For now, using a placeholder agreed_reward.
-                    # In a more advanced system, this would come from negotiated terms
-                    # or the SkillAgent's advertised service cost.
-                    agreed_payment_amount = 5.0 # Placeholder for payment amount
+                    agreed_terms = req_details.get("agreed_terms", {})
+                    agreed_payment_amount = agreed_terms.get("energy_cost_charged_to_task_agent", 0.0) # Use agreed cost
                     skill_agent_name_for_payment = req_details['target_skill_agent_id']
                     task_id_for_payment = req_id
 
-                    log(f"[{self.name}] Attempting to pay SkillAgent '{skill_agent_name_for_payment}' {agreed_payment_amount} energy for successful task '{task_id_for_payment}'.", level="INFO")
-                    payment_successful = self.context_manager.process_inter_agent_energy_transfer(
-                        payer_agent_name=self.name,
-                        payee_agent_name=skill_agent_name_for_payment,
-                        amount=agreed_payment_amount,
-                        reason=f"Payment for successful completion of task {task_id_for_payment}"
-                    )
-                    if payment_successful:
-                        log(f"[{self.name}] Successfully paid {skill_agent_name_for_payment} {agreed_payment_amount} energy for task {task_id_for_payment}.")
+                    if agreed_payment_amount > 0:
+                        log(f"[{self.name}] Attempting to pay SkillAgent '{skill_agent_name_for_payment}' {agreed_payment_amount:.2f} energy for successful task '{task_id_for_payment}'.", level="INFO")
+                        payment_successful = self.context_manager.process_inter_agent_energy_transfer(
+                            payer_agent_name=self.name,
+                            payee_agent_name=skill_agent_name_for_payment,
+                            amount=agreed_payment_amount,
+                            reason=f"Payment for successful completion of task {task_id_for_payment}"
+                        )
+                        if payment_successful:
+                            log(f"[{self.name}] Successfully paid {skill_agent_name_for_payment} {agreed_payment_amount:.2f} energy for task {task_id_for_payment}.")
+                        else:
+                            log(f"[{self.name}] Failed to pay {skill_agent_name_for_payment} for task {task_id_for_payment}. Check ContextManager logs.", level="WARN")
                     else:
-                        log(f"[{self.name}] Failed to pay {skill_agent_name_for_payment} for task {task_id_for_payment}. Check ContextManager logs.", level="WARN")
+                        log(f"[{self.name}] No payment processed for task {task_id_for_payment} as agreed cost was {agreed_payment_amount:.2f}.", level="DEBUG")
                     # --- End Inter-Agent Payment Logic --- 
                 else:
-                    failure_reason_detail = skill_operation_data.get("message", skill_operation_data.get("error", status))
+                    failure_reason_detail = response_content.get("message", response_content.get("error", skill_reported_status))
                     log(f"[{self.name}] Skill request '{req_id}' to '{req_details['target_skill_agent_id']}' reported operational failure: {failure_reason_detail}", level="WARNING")
 
                 self._update_q_value( 
@@ -674,9 +681,10 @@ class TaskAgent(BaseAgent):
                         "tick": current_tick,
                         "target_skill_agent_id": req_details['target_skill_agent_id'],
                         "action_requested": req_details['request_data'].get('action', req_details.get('skill_action_to_request', 'unknown_skill_action')),
-                        "reason": f"failure_skill_response_{status}"
+                        "reason": f"failure_skill_response_{skill_reported_status}"
                     }
                 completed_request_ids.append(req_id)
+                self.communication_bus.mark_message_processed(response_message['id']) # Mark as processed
 
         for req_id in completed_request_ids:
             if req_id in self.state['pending_skill_requests']: 
@@ -698,12 +706,14 @@ class TaskAgent(BaseAgent):
                 continue
 
             # Check for response message from SkillAgent
-            # Assuming TASK_OFFER_RESPONSE messages are direct and have 'negotiation_id' in payload
             response_message = self.communication_bus.get_message_by_request_id(
-                recipient_agent_name=self.name, # Messages are for me
+                recipient_agent_id=self.name, # Corrected parameter name
                 request_id_to_find=neg_id,      # Match by negotiation_id
-                message_type_filter="TASK_OFFER_RESPONSE" # New filter for comms bus
+                # message_type_filter="TASK_OFFER_RESPONSE" # This filter is not in get_message_by_request_id
             )
+            # Filter by type after getting the message
+            if response_message and response_message.get('content', {}).get('type') != "TASK_OFFER_RESPONSE":
+                response_message = None # Ignore if not the right type
 
             if response_message:
                 response_payload = response_message['content'].get('payload', {})
@@ -791,10 +801,14 @@ class TaskAgent(BaseAgent):
                 continue
 
             ack_message = self.communication_bus.get_message_by_request_id(
-                recipient_agent_name=self.name,
+                recipient_agent_id=self.name, # Corrected parameter name
                 request_id_to_find=contract_id, # Match by contract_id
-                message_type_filter="CONTRACT_ACKNOWLEDGED"
+                # message_type_filter="CONTRACT_ACKNOWLEDGED" # This filter is not in get_message_by_request_id
             )
+            # Filter by type after getting the message
+            if ack_message and ack_message.get('content', {}).get('type') != "CONTRACT_ACKNOWLEDGED":
+                ack_message = None # Ignore if not the right type
+
 
             if ack_message:
                 ack_payload = ack_message['content'].get('payload', {})
@@ -806,19 +820,20 @@ class TaskAgent(BaseAgent):
                     skill_execution_request_id = contract_details.get("original_invoking_capability_request_id", f"skill_req_{contract_id}")
                     
                     skill_execution_message_content = {
-                        "action": contract_details["capability_requested"],
-                        "request_id": skill_execution_request_id, # Use contract_id or original request_id
+                        # "action": contract_details["capability_requested"], # 'action' is not used by SkillAgent's _handle_message for execution
+                        "type": "SKILL_EXECUTION_REQUEST", # New, more explicit type
+                        "request_id": skill_execution_request_id, 
                         "data": {"tool_command_str": contract_details["tool_command_str"]}
                     }
                     self.state['pending_skill_requests'][skill_execution_request_id] = {
                         "target_skill_agent_id": contract_details["skill_agent_id"],
-                        "capability_name": contract_details["capability_requested"],
+                        "capability_name": contract_details["capability_requested"], # The conceptual capability
                         "request_data": skill_execution_message_content['data'],
                         "original_rl_state": self.state.get("last_rl_state_before_action", self._get_rl_state_representation()),
                         "success_reward": contract_details["agreed_terms"]["reward_for_success"],
                         "failure_reward": -1.0, # Standard failure penalty
                         "timeout_reward": -0.5, # Standard timeout penalty
-                        "timeout_at_tick": current_tick + contract_details["agreed_terms"].get("deadline_ticks", 50) - current_tick + 10, # Use agreed deadline
+                        "timeout_at_tick": current_tick + (contract_details["agreed_terms"].get("deadline_ticks", current_tick + 50) - current_tick + 10), # Use agreed deadline
                         "agreed_terms": contract_details["agreed_terms"] # Store the final agreed terms
                     }
                     self.communication_bus.send_direct_message(self.name, contract_details["skill_agent_id"], skill_execution_message_content)
@@ -877,7 +892,7 @@ class TaskAgent(BaseAgent):
                                     processed_details = {"parsed_plan": parsed_plan, "summary_for_user": "Goal interpreted into plan."}
                                     self.set_goal({
                                         "type": "execute_llm_generated_plan",
-                                        "details": {"plan_to_execute": parsed_plan, "original_user_query": req_details.get("original_cap_inputs")}
+                                        "details": {"plan_to_execute": parsed_plan, "original_user_query": req_details.get("original_cap_inputs", {}).get("user_query")}
                                     })
                                     log(f"[{self.name}] LLM successfully interpreted user goal into plan. New goal set: 'execute_llm_generated_plan'. Plan: {str(parsed_plan)[:200]}", level="INFO")
                                 else:
@@ -895,9 +910,9 @@ class TaskAgent(BaseAgent):
                             processed_details = {"llm_response_text": llm_content}
                             self.conversation_history.append({"role": "assistant", "content": llm_content})
                             log(f"[{self.name}] LLM generated conversational response: {llm_content[:100]}", level="INFO")
-                            if self.context_manager and hasattr(self.context_manager, 'display_system_insight'):
-                                original_prompt = req_details.get("original_cap_inputs", "User query N/A")
-                                self.context_manager.display_system_insight({
+                            if self.context_manager and hasattr(self.context_manager, 'post_insight_to_gui'):
+                                original_prompt = req_details.get("original_cap_inputs", {}).get("user_input_text", "User query N/A")
+                                self.context_manager.post_insight_to_gui({ # Use post_insight_to_gui
                                      "diagnosing_agent_id": self.name,
                                     "root_cause_hypothesis": f"LLM Response to: '{original_prompt}'", 
                                     "confidence": 0.95, 
@@ -910,7 +925,7 @@ class TaskAgent(BaseAgent):
                         log(f"[{self.name}] LLM operation '{req_id}' completed but returned no content.", level="WARNING")
                         
                 else: 
-                    processed_details = {"error": llm_response_data.get("error", "Unknown LLM error occurred.")}
+                    processed_details = {"error": llm_response_data.get("error_details", "Unknown LLM error occurred.")} # Use error_details
                     log(f"[{self.name}] LLM call error status: {processed_details['error']}", level="ERROR")
 
                 self._update_q_value(req_details["original_rl_state"], req_details["capability_initiated"], reward_to_apply, self._get_rl_state_representation())
@@ -959,13 +974,11 @@ class TaskAgent(BaseAgent):
                 log(f"[{self.name}] get_fitness: Skipping action '{tick_log.get('action')}' from num_actions due to exclusion or no reward. Tick log: {str(tick_log)[:100]}", level="DEBUG") 
 
             if tick_log.get("action") == "triangulated_insight_v1" and "success" in tick_log.get("outcome", ""):
-                diagnosis_data = tick_log.get("diagnosis")
-                if not diagnosis_data and "details" in tick_log:
-                    diagnosis_data = tick_log.get("details", {}).get("diagnosis")
-
-                if diagnosis_data and isinstance(diagnosis_data, dict) and diagnosis_data.get("confidence", 0.0) > self.insight_confidence_threshold: 
+                # The insight details are now in the 'best_insight' field of the result's 'details'
+                insight_details_from_log = tick_log.get("details", {}).get("best_insight", {})
+                if insight_details_from_log and isinstance(insight_details_from_log, dict) and insight_details_from_log.get("confidence", 0.0) > self.insight_confidence_threshold: 
                      successful_insights_count += 1
-                     total_insight_confidence += diagnosis_data.get("confidence", 0.0)
+                     total_insight_confidence += insight_details_from_log.get("confidence", 0.0)
         
         average_reward = (total_reward / num_actions) if num_actions > 0 else 0.0 
         normalized_reward_component = (average_reward + 1) / 2 # Standard normalization for [-1, 1] to [0, 1]
@@ -1016,8 +1029,10 @@ class TaskAgent(BaseAgent):
                 response_content = response_message['content']
                 status_from_skill_agent = response_content.get("status", "failure_unknown_response_format")
                 skill_op_data = response_content.get("data", {})
-                op_status_tool = skill_op_data.get("status", "success") 
-                is_overall_success = "success" in status_from_skill_agent.lower() and "success" in op_status_tool.lower()
+                # SkillAgent's response payload for success is {"status": "success", "data": ..., "message": ...}
+                # We need to check the 'status' within this payload.
+                skill_reported_status = response_content.get("status", "failure_unknown_response_format")
+                is_overall_success = "success" in skill_reported_status.lower()
                 
                 reward_for_sync_step = sync_step_details_from_invoke["rewards_for_resolution"]["success"] if is_overall_success else sync_step_details_from_invoke["rewards_for_resolution"]["failure"]
                 outcome_for_sync_step = "success_response_received_sync" if is_overall_success else "failure_skill_response_sync"
@@ -1099,8 +1114,8 @@ class TaskAgent(BaseAgent):
                 chosen_capability_name = "sequence_executor_v1"
                 cap_inputs_for_execution = {
                     "sub_sequence": plan_to_execute,
-                    "pass_outputs_between_steps": False,
-                    "stop_on_failure": True
+                    "pass_outputs_between_steps": False, # Default, can be overridden by plan
+                    "stop_on_failure": True # Default, can be overridden by plan
                 }
                 action_selection_reason = "executing_llm_generated_plan"
                 # The goal is consumed by selecting this capability.
@@ -1122,8 +1137,8 @@ class TaskAgent(BaseAgent):
                 log(f"[{self.name}] Goal-driven choice: Processing 'user_defined_goal': '{goal_description}' by selecting LLM capability.", level="INFO")
                 # Acknowledge the goal in the GUI
                 ack_insight = {"diagnosing_agent_id": self.name, "root_cause_hypothesis": f"Received user goal: '{goal_description}'. Attempting to interpret...", "confidence": 0.95, "suggested_actions": ["LLM Interpretation"]}
-                if self.context_manager and hasattr(self.context_manager, 'display_system_insight'): # Use the correct method name
-                    self.context_manager.display_system_insight(ack_insight)
+                if self.context_manager and hasattr(self.context_manager, 'post_insight_to_gui'): # Use the correct method name
+                    self.context_manager.post_insight_to_gui(ack_insight)
 
                 if self.has_capability("interpret_goal_with_llm_v1"):
                     # Set the goal to indicate interpretation is pending/needed
@@ -1132,11 +1147,19 @@ class TaskAgent(BaseAgent):
                     # Do NOT set chosen_capability_name here. The logic below for "interpret_user_goal" or RL will pick it up.
 
                 elif self.has_capability("conversational_exchange_llm_v1"):
-                    log(f"[{self.name}] No 'interpret_goal_with_llm_v1'. Using 'conversational_exchange_llm_v1' for user goal: '{goal_description}'", level="INFO")
-                    # Execute conversational exchange immediately as it's a single turn
-                    self._execute_conversational_goal(goal_description, context, knowledge, all_agent_names_in_system)
-                    chosen_capability_name = "conversational_exchange_llm_v1" # Mark as handled this tick
-                    action_selection_reason = "user_goal_llm_conversation"
+                    # Ensure conversational_exchange_llm_v1 is not chosen if the goal is already to self-diagnose
+                    if self.current_goal.get("type") == "self_diagnose_failures":
+                        log(f"[{self.name}] Goal is 'self_diagnose_failures', skipping conversational exchange for user_defined_goal '{goal_description}'.", level="DEBUG")
+                        # Let the self_diagnose_failures logic below handle it.
+                        # We might need to ensure that if self_diagnose_failures was set by _update_state_after_action,
+                        # it takes precedence in this same tick if possible, or the next tick.
+                        # For now, if self_diagnose_failures is set, the next block will catch it.
+                        pass
+                    else:
+                        log(f"[{self.name}] No 'interpret_goal_with_llm_v1'. Using 'conversational_exchange_llm_v1' for user goal: '{goal_description}'", level="INFO")
+                        self._execute_conversational_goal(goal_description, context, knowledge, all_agent_names_in_system)
+                        chosen_capability_name = "conversational_exchange_llm_v1" # Mark as handled this tick
+                        action_selection_reason = "user_goal_llm_conversation"
                     # _execute_conversational_goal will set goal to idle.
                 else:
                     log(f"[{self.name}] Goal-driven choice: Has 'user_defined_goal' but no LLM capability (interpret or conversational). Will fall to RL/idle.", level="WARN")
@@ -1194,12 +1217,12 @@ class TaskAgent(BaseAgent):
         elif not chosen_capability_name and self.current_goal.get("type") == "investigate_symptoms" and not self.last_diagnosis: # Only if no diagnosis is pending action
             log(f"[{self.name}] Goal-driven choice: Goal is 'investigate_symptoms'. Letting RL choose next action (e.g., knowledge_retrieval or triangulated_insight).", level="DEBUG")
         elif self.current_goal.get("type") == "investigate_symptoms" and self.last_diagnosis:
-            log(f"[{self.name}] Goal is 'investigate_symptoms' and has a last_diagnosis: {self.last_diagnosis.get('diagnosis_id')}")
-            suggested_actions = self.last_diagnosis.get("suggested_action_flags", [])
+            log(f"[{self.name}] Goal is 'investigate_symptoms' and has a last_diagnosis: {self.last_diagnosis.get('root_cause_hypothesis')}") # Use root_cause_hypothesis
+            suggested_actions = self.last_diagnosis.get("suggested_actions", []) # Use suggested_actions
             
-            if "run_diagnostic_sequence_A" in suggested_actions and self.has_capability("sequence_executor_v1"):
+            if "run_diagnostic_sequence_A" in suggested_actions and self.has_capability("sequence_executor_v1"): # Example action
                 chosen_capability_name = "sequence_executor_v1"
-                cap_inputs_for_execution = {"sub_sequence_param_key_to_use": "diagnostic_sequence_A_params"}
+                cap_inputs_for_execution = {"sub_sequence_param_key_to_use": "diagnostic_sequence_A_params"} # Ensure this param key exists
                 action_selection_reason = "diagnosis_suggestion_sequence_A"
                 log(f"[{self.name}] Goal-driven choice (from diagnosis): Chose '{chosen_capability_name}' for sequence 'diagnostic_sequence_A_params'.")
             
@@ -1335,21 +1358,21 @@ class TaskAgent(BaseAgent):
 
         # Specific goal updates based on LLM interpretation results (if not pending)
         if executed_capability == "interpret_goal_with_llm_v1" and outcome == "success_goal_interpreted":
-            parsed_action_details = details # Assuming 'details' contains the parsed plan/action
+            parsed_action_details = details.get("parsed_plan", details) # Prefer "parsed_plan" if present
             original_user_query = details.get("original_user_query", "Unknown query") # Capability should pass this back
             if isinstance(parsed_action_details, list): # If it's a plan
                 self.set_goal({
                     "type": "execute_llm_generated_plan",
                     "details": {"plan_to_execute": parsed_action_details, "original_user_query": original_user_query}
                 })
-            elif parsed_action_details.get("type") == "invoke_skill":
+            elif isinstance(parsed_action_details, dict) and parsed_action_details.get("type") == "invoke_skill":
                 self.set_goal({
                     "type": "execute_parsed_skill_invocation",
                     "details": parsed_action_details,
                     "original_user_query": original_user_query
                 })
             else:
-                log(f"[{self.name}] LLM interpretation successful but result type '{parsed_action_details.get('type')}' not directly actionable for new goal. Setting to idle. Details: {parsed_action_details}", level="WARN")
+                log(f"[{self.name}] LLM interpretation successful but result type '{type(parsed_action_details)}' or content not directly actionable for new goal. Setting to idle. Details: {str(parsed_action_details)[:200]}", level="WARN")
                 self.current_goal = {"type": "idle", "reason": "llm_interpretation_unhandled_type_after_success"}
 
         elif executed_capability == "conversational_exchange_llm_v1" and outcome == "success_conversation_response":
@@ -1412,7 +1435,7 @@ class TaskAgent(BaseAgent):
            "pending" not in outcome:
             log(f"[{self.name}] Action '{executed_capability}' completed for 'user_defined_goal', but goal was not transitioned. Setting to idle.", level="DEBUG")
             self.current_goal = {"type": "idle", "reason": "user_defined_goal_action_completed_no_transition"}
-            chosen_capability_name = "conversational_exchange_llm_v1" # Mark as handled this tick
+            # chosen_capability_name = "conversational_exchange_llm_v1" # This line was problematic and removed
 
 
     def _update_q_value(self, state_tuple: tuple, action: str, reward: float, next_state_tuple: tuple):

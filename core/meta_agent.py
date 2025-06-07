@@ -18,6 +18,7 @@ if TYPE_CHECKING: # TYPE_CHECKING is True for static analysis
     from .task_router import TaskRouter
     # from .skill_agent import SkillAgent # Already imported above
     from engine.identity_engine import IdentityEngine
+    from agents.code_gen_agent import LLMInterface # For type hinting
     from agents.code_gen_agent import CodeGenAgent # If MetaAgent manages CodeGenAgent lifecycle
 
 
@@ -32,7 +33,9 @@ class MetaAgent: # Ensure it inherits from BaseAgent for message handling
                  identity_engine: 'IdentityEngine', # Accept IdentityEngine instance
                  default_task_agent_config: Dict[str, Any],  # Added
                  default_skill_agent_configs: List[Dict[str, Any]],
-                 code_gen_agent: Optional['CodeGenAgent'] = None): # Optional CodeGenAgent
+                 code_gen_agent: Optional['CodeGenAgent'] = None, # Optional CodeGenAgent
+                 general_llm_interface: Optional['LLMInterface'] = None, # Added
+                 initial_task_agents: int = 1): # Added to control initial task agents
         self.name = "MetaAgent" # Added name attribute
 
         self.context = context
@@ -54,6 +57,7 @@ class MetaAgent: # Ensure it inherits from BaseAgent for message handling
 
         self.identity_engine = identity_engine # Use the passed IdentityEngine instance
         self.code_gen_agent = code_gen_agent # Store CodeGenAgent if provided
+        self.general_llm_interface = general_llm_interface # Store general LLM interface
         
         self.default_task_agent_config = default_task_agent_config
         self.default_skill_agent_configs = default_skill_agent_configs # Store the passed list
@@ -95,6 +99,10 @@ class MetaAgent: # Ensure it inherits from BaseAgent for message handling
         
         # To store received service advertisements
         self.service_advertisements: Dict[str, Dict[str, Any]] = {} # agent_id -> advertisement_payload
+
+        # Initialize initial TaskAgents
+        for i in range(initial_task_agents):
+            self._provision_initial_task_agent(i)
 
 
     def set_task_router(self, task_router: 'TaskRouter'):
@@ -408,6 +416,26 @@ class MetaAgent: # Ensure it inherits from BaseAgent for message handling
             log(f"[{self.name}] Failed to provision temporary SkillAgent for lineage '{lineage_id}'. add_agent_from_config returned None.", level="ERROR")
             return False
 
+    def _provision_initial_task_agent(self, index: int):
+        """Provisions an initial TaskAgent based on the default config."""
+        if not self.default_task_agent_config:
+            log(f"[{self.name}] Cannot provision initial TaskAgent: default_task_agent_config is missing.", level="ERROR")
+            return
+
+        initial_config = copy.deepcopy(self.default_task_agent_config)
+        # Ensure unique name and ID for initial agents if multiple are created
+        base_name = initial_config.get("name", "TaskAgent-Gen0")
+        if not base_name.endswith(f"_{index}"): # Avoid double suffixing if already there
+            initial_config["name"] = f"{base_name}_{index}"
+            initial_config["agent_id"] = initial_config["name"]
+        
+        log(f"[{self.name}] Attempting to add initial TaskAgent: {initial_config['name']}", level="INFO")
+        new_agent_instance = self.add_agent_from_config(initial_config)
+        if new_agent_instance:
+            log(f"[{self.name}] Successfully provisioned initial TaskAgent: {new_agent_instance.name}", level="INFO")
+        else:
+            log(f"[{self.name}] Failed to provision initial TaskAgent: {initial_config['name']}", level="ERROR")
+
     def add_agent_from_config(self, agent_config: Dict[str, Any]) -> Optional[Any]:
         """Adds a new agent to the system based on its configuration."""
         agent_type = agent_config.get("agent_type")
@@ -450,6 +478,7 @@ class MetaAgent: # Ensure it inherits from BaseAgent for message handling
                     context_manager=self.context,
                     knowledge_base=self.knowledge,
                     communication_bus=self.communication_bus,
+                    llm_interface=self.general_llm_interface, # Pass the LLM interface
                     identity_engine=self.identity_engine, # Pass IdentityEngine
                     **task_agent_specific_config  # Unpack the modified config
                 )
@@ -570,4 +599,3 @@ class MetaAgent: # Ensure it inherits from BaseAgent for message handling
                     except Exception as e:
                         log(f"[{self.name}] Error getting/processing capabilities from skill_tool {type(tool)} for agent {skill_agent_instance.name}: {e}", level="ERROR")
         log(f"[{self.name}] Skill action registry updated. {len(self.skill_action_registry)} actions mapped. Example action 'add' providers: {self.skill_action_registry.get('add', [])}", level="DEBUG")
-

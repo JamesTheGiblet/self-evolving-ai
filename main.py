@@ -149,7 +149,9 @@ def main():
         skill_agents=dynamic_skill_agents,
         identity_engine=identity_engine_instance,
         default_task_agent_config=default_task_agent_config,
-        default_skill_agent_configs=dynamic_default_skill_agent_configs
+        default_skill_agent_configs=dynamic_default_skill_agent_configs,
+        general_llm_interface=general_llm_interface, # Pass the general LLM interface
+        initial_task_agents=1 # Explicitly create one initial task agent
     )
 
     # Setup TaskRouter with current skill agents
