@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from memory.knowledge_base import KnowledgeBase
     from core.context_manager import ContextManager
     from engine.communication_bus import CommunicationBus
+    from agents.code_gen_agent import LLMInterface # For LLM interaction
 
 class CreativeSynthesizerSkill(BaseSkillTool):
     """
@@ -27,12 +28,23 @@ class CreativeSynthesizerSkill(BaseSkillTool):
                  communication_bus: 'CommunicationBus',
                  agent_name: str,
                  agent_id: str,
+                 llm_interface: 'Optional[LLMInterface]' = None, # Added LLMInterface dependency
                  **kwargs: Any):
         """
         Initializes the CreativeSynthesizerSkill.
+
+        Args:
+            # ... (other standard args)
+            llm_interface (Optional[LLMInterface]): An instance of LLMInterface for text generation.
         """
         super().__init__(skill_config, knowledge_base, context_manager, communication_bus, agent_name, agent_id, **kwargs)
-        log(f"[{self.skill_name}] Initialized for agent {agent_name} ({agent_id}).", level="INFO")
+        self.llm_interface = llm_interface
+        if self.llm_interface:
+            log(f"[{self.skill_name}] Initialized for agent {agent_name} ({agent_id}) with LLMInterface.", level="INFO")
+        else:
+            log(f"[{self.skill_name}] Initialized for agent {agent_name} ({agent_id}) WITHOUT LLMInterface. Creative summarization will be limited.", level="WARN")
+
+
 
     def get_capabilities(self) -> Dict[str, Any]:
         """
@@ -43,7 +55,7 @@ class CreativeSynthesizerSkill(BaseSkillTool):
             "description": "Generates creative text summaries, echoes text, provides basic text stats, and shows the current date.",
             "commands": {
                 "summarize_creatively": {
-                    "description": "Generates a creative summary for the provided text. (Currently mock).",
+                    "description": "Generates a creative summary for the provided text using an LLM.",
                     "args_usage": "\"<text_to_summarize>\"",
                     "example": "summarize_creatively \"The quick brown fox jumps over the lazy dog. It was a sunny day.\"",
                     "keywords": ["summarize", "creative summary", "text synthesis", "abstract", "gist"]
@@ -74,13 +86,38 @@ class CreativeSynthesizerSkill(BaseSkillTool):
         Placeholder for creative text summarization.
         In a real implementation, this might call an LLM or a sophisticated summarization model.
         """
-        log(f"[{self.skill_name}] Generating mock creative summary for: '{text_to_summarize[:50]}...'", level="DEBUG")
-        # Mock implementation
-        summary = f"A creatively imagined summary of '{text_to_summarize[:30]}...' would highlight its essence with flair and imagination."
-        if len(text_to_summarize) < 10:
-            summary = "The text is too short for a meaningful creative summary, but imagine the possibilities!"
-        
-        return self._build_response_dict(success=True, data={"original_text_preview": text_to_summarize[:100], "creative_summary": summary})
+        if not self.llm_interface:
+            log(f"[{self.skill_name}] LLMInterface not available for creative summarization.", level="ERROR")
+            return self._build_response_dict(success=False, error="Creative summarization unavailable: LLMInterface not configured.")
+
+        if not text_to_summarize or not text_to_summarize.strip():
+            return self._build_response_dict(success=False, error="No text provided for summarization.")
+
+        log(f"[{self.skill_name}] Requesting creative summary for: '{text_to_summarize[:70]}...'", level="DEBUG")
+
+        system_prompt = (
+            "You are a master of language, renowned for your ability to distill complex information "
+            "into brief, imaginative, and engaging summaries. Your summaries should not just state facts, "
+            "but evoke feeling, paint pictures with words, and offer fresh perspectives. "
+            "Avoid dry, factual restatements. Aim for poetic, metaphorical, or narrative flair. "
+            "The summary should be concise and capture the essence of the text."
+        )
+        user_prompt = f"Please provide a creative summary for the following text:\n\n---\n{text_to_summarize}\n---"
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+
+        try:
+            summary = self.llm_interface.call_llm_api(messages)
+            if summary:
+                return self._build_response_dict(success=True, data={"original_text_preview": text_to_summarize[:100], "creative_summary": summary.strip()})
+            else:
+                return self._build_response_dict(success=False, error="LLM failed to generate a summary.")
+        except Exception as e:
+            log(f"[{self.skill_name}] Error calling LLM for summarization: {e}", level="ERROR", exc_info=True)
+            return self._build_response_dict(success=False, error=f"Error during LLM call: {str(e)}")
 
     def _handle_echo_text(self, text_args: List[str]) -> Dict[str, Any]:
         """

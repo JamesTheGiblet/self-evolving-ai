@@ -19,7 +19,7 @@ from memory.knowledge_base import KnowledgeBase
 from core.context_manager import ContextManager
 from engine.communication_bus import CommunicationBus
 from engine.identity_engine import IdentityEngine # For type hinting
-from agents.code_gen_agent import CodeGenAgent # For type hinting
+from agents.code_gen_agent import CodeGenAgent, LLMInterface # For type hinting
 from utils.logger import log
 
 # --- Helper Function to Generate Lineage IDs ---
@@ -52,7 +52,8 @@ def load_skills_dynamically(
     context_manager_instance: ContextManager,
     communication_bus_instance: CommunicationBus,
     identity_engine_instance: IdentityEngine, # Added
-    code_gen_agent_instance: Optional[CodeGenAgent] = None # Added for CodeGenAgent
+    code_gen_agent_instance: Optional[CodeGenAgent] = None, # Added for CodeGenAgent
+    general_llm_interface_instance: Optional[LLMInterface] = None # Added for general LLM tasks
 ) -> Tuple[List[SkillAgent], List[Dict]]:
     """
     Dynamically loads skill tools from the specified directory,
@@ -65,6 +66,7 @@ def load_skills_dynamically(
         communication_bus_instance: Instance of CommunicationBus.
         identity_engine_instance: Instance of IdentityEngine.
         code_gen_agent_instance: Optional instance of CodeGenAgent.
+        general_llm_interface_instance: Optional instance of a general LLMInterface.
 
     Returns:
         A tuple containing:
@@ -167,10 +169,17 @@ def load_skills_dynamically(
                     # Check if the skill tool's constructor expects 'code_gen_agent'
                     requires_code_gen_agent_flag = False
                     init_params = inspect.signature(skill_class_to_instantiate.__init__).parameters
+                    
                     if 'code_gen_agent' in init_params and code_gen_agent_instance:
                         tool_constructor_args['code_gen_agent'] = code_gen_agent_instance
                         requires_code_gen_agent_flag = True
                         log(f"Passing CodeGenAgent to {skill_class_name}", level="DEBUG")
+
+                    # Check if the skill tool's constructor expects 'llm_interface'
+                    if 'llm_interface' in init_params and general_llm_interface_instance:
+                        tool_constructor_args['llm_interface'] = general_llm_interface_instance
+                        log(f"Passing general LLMInterface to {skill_class_name}", level="DEBUG")
+
 
                     skill_tool_instance: BaseSkillTool = skill_class_to_instantiate(**tool_constructor_args)
                     

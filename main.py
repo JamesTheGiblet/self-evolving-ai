@@ -95,6 +95,13 @@ def main():
     )
     code_gen_agent_instance = CodeGenAgent(llm_interface=code_gen_llm_interface)
     log("[Main] CodeGenAgent instance created.", level="INFO")
+    
+    # Initialize a general-purpose LLMInterface for other skills (e.g., creative text generation)
+    # For now, it can use the same model, but this allows for future specialization.
+    general_llm_interface = LLMInterface(
+        model_name=config.LOCAL_LLM_DEFAULT_MODEL 
+    )
+    log("[Main] General LLMInterface instance created.", level="INFO")
 
     # Load skill agents dynamically from the 'skills' directory
     skills_dir = os.path.join(PROJECT_ROOT, "skills")
@@ -105,7 +112,8 @@ def main():
         context_manager_instance=context_manager,
         communication_bus_instance=communication_bus,
         identity_engine_instance=identity_engine_instance,
-        code_gen_agent_instance=code_gen_agent_instance # Pass it here
+        code_gen_agent_instance=code_gen_agent_instance, # Pass CodeGenAgent
+        general_llm_interface_instance=general_llm_interface # Pass general LLMInterface
     )
     log(f"Dynamically initialized {len(dynamic_skill_agents)} skill agents.", level="INFO")
 
