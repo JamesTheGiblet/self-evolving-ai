@@ -96,6 +96,10 @@ class SkillAgent(BaseAgent):
              self.memory = AgentMemory(agent_id=self.id)
         log(f"SkillAgent '{self.name}' (ID: {self.id}) initialized. Skill: '{self.skill_tool.skill_name if hasattr(self.skill_tool, 'skill_name') else 'UnknownSkill'}', Lineage: {self.lineage_id}, Gen: {self.generation}, InitialEnergy: {self.energy:.2f}, MaxAge: {self.max_age}.", level="INFO")
 
+        # Advertise services upon initialization
+        if self.communication_bus:
+            self.advertise_services()
+
     def execute_skill_action(self, skill_command_str: str, params: Dict[str, Any], invoking_agent_id: str, task_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Executes a specific command using its skill_tool.
@@ -227,41 +231,23 @@ class SkillAgent(BaseAgent):
         if intended_skill_action_category and request_id:
             log(f"[{self.name}] Identified skill execution request from {sender_id} (ReqID: {request_id}): Intended Action Category '{intended_skill_action_category}'", level="INFO")
 
-            actual_command_for_tool = None
-            # Determine the actual command string for the skill_tool.execute() method
-            # This logic is copied from SkillAgent.run's previous message loop
-            if intended_skill_action_category == "maths_operation" and "maths_command" in params_from_message:
-                actual_command_for_tool = params_from_message["maths_command"]
-            elif intended_skill_action_category == "file_operation" and "file_command" in params_from_message:
-                actual_command_for_tool = params_from_message["file_command"]
-            elif intended_skill_action_category == "web_operation" and "web_command" in params_from_message:
-                actual_command_for_tool = params_from_message["web_command"]
-            elif intended_skill_action_category == "api_call" and "api_command" in params_from_message: # For ApiConnector
-                actual_command_for_tool = params_from_message["api_command"]
-            elif intended_skill_action_category == "calendar_operation" and "calendar_command" in params_from_message: # For Calendar
-                actual_command_for_tool = params_from_message["calendar_command"]
-            elif intended_skill_action_category == "echo_operation" and "echo_command" in params_from_message: # For EchoSkill
-                actual_command_for_tool = params_from_message["echo_command"]
-            elif intended_skill_action_category == "weather_query" and "weather_command" in params_from_message: # For Weather
-                 actual_command_for_tool = params_from_message["weather_command"]
-            # Add more specific handlers if 'action' is a category and 'data' contains the true command
-            elif intended_skill_action_category in ["log_summary", "complexity_analysis", "basic_stats_analysis"] and "data_points" in params_from_message:
-                # For these, the command_str for the tool might be the JSON payload itself, or a specific command
-                # This depends on how the DataAnalysisSkill is designed to be called.
-                # If DataAnalysisSkill expects a command like "summarize_logs" and then the data:
-                # actual_command_for_tool = f"{intended_skill_action_category} {json.dumps(params_from_message)}"
-                # Or if it just takes the JSON string directly for its _execute_skill:
-                actual_command_for_tool = json.dumps(params_from_message)
-            else:
-                # Fallback: if 'action' is not a known category that nests the command,
-                # assume 'action' itself is the command string for the tool.
-                # This might be the case if TaskAgent sends the direct skill command in 'action'.
-                log(f"[{self.name}] Using 'action' field ('{intended_skill_action_category}') from message content directly as command for skill tool. Params from message data: {params_from_message}", level="DEBUG")
+            # Assumption: The invoking capability (e.g., invoke_skill_agent_v1)
+            # now places the exact command string for the skill_tool into
+            # params_from_message["tool_command_str"].
+            # The 'intended_skill_action_category' (message_content.get('action'))
+            # can still be used for high-level categorization or logging.
+
+            actual_command_for_tool = params_from_message.get("tool_command_str")
+
+            if not actual_command_for_tool:
+                # Fallback: if "tool_command_str" is not present, try to use the
+                # 'intended_skill_action_category' directly as the command.
+                # This maintains some backward compatibility or handles simpler invocations.
+                log(f"[{self.name}] 'tool_command_str' not found in message data. Using 'action' field ('{intended_skill_action_category}') as command for skill tool. Message data: {params_from_message}", level="DEBUG")
                 actual_command_for_tool = intended_skill_action_category
-                # If params_from_message are arguments, they need to be appended to actual_command_for_tool
-                # This part needs careful consideration based on how TaskAgent formats messages.
-                # For now, assuming if 'action' is the command, 'data' might be ignored by some simple skills
-                # or used by more complex ones that parse their own data.
+                # If this fallback is used, params_from_message might contain arguments
+                # that the skill_tool needs to parse from the command string itself, or handle separately.
+                # This path requires skill_tools to be more complex in their parsing.
 
             if actual_command_for_tool is None:
                 log(f"[{self.name}] Could not determine actual command for skill tool from message: {message_content}", level="WARN")
@@ -292,6 +278,59 @@ class SkillAgent(BaseAgent):
         # If it's not a skill request message, let the base class handle it.
         # This is where generic broadcasts or other message types would be handled by BaseAgent.
         return super()._handle_message(sender_id, message_content)
+    
+    def _evaluate_task_offer(self, proposed_terms: Dict[str, Any], capability_requested: str, tool_command_str: str) -> Dict[str, Any]:
+        """
+        Evaluates a task offer from a TaskAgent.
+        Returns a dictionary with "response_type" ("accept", "reject") and "reason"/"actual_terms".
+        """
+        # Simple evaluation logic for now:
+        # - Check if agent has enough energy for the potential cost.
+        # - Check if the reward is positive.
+        # - Check if the capability is something this agent can do.
+
+        # Cost to SkillAgent for executing the skill (internal estimate)
+        estimated_internal_cost = self.get_estimated_cost() # This is cost per invocation, not per specific command yet
+        
+        # Max cost the TaskAgent is willing for the SkillAgent to charge it (this is different from internal cost)
+        # For now, let's assume the SkillAgent will charge what the TaskAgent is willing to pay if it's profitable.
+        max_chargeable_cost = proposed_terms.get("max_energy_cost_to_task_agent", 0.0)
+        proposed_reward = proposed_terms.get("reward_for_success", 0.0)
+
+        # Profitability check (simplified)
+        # If reward > internal_cost AND chargeable_cost >= internal_cost
+        # This is a very basic model. A real model would consider opportunity cost, risk, etc.
+        is_profitable = (proposed_reward > estimated_internal_cost) and \
+                        (max_chargeable_cost >= estimated_internal_cost)
+
+        can_perform_capability = capability_requested in self.capabilities # Check if the conceptual capability is offered
+        # A more detailed check might involve validating the tool_command_str against the skill_tool
+
+        if self.energy > estimated_internal_cost and is_profitable and can_perform_capability:
+            log(f"[{self.name}] Evaluating TASK_OFFER for '{capability_requested}': ACCEPTING. Proposed reward: {proposed_reward}, Max cost to task_agent: {max_chargeable_cost}, My estimated internal cost: {estimated_internal_cost}", level="INFO")
+            return {
+                "response_type": "accept",
+                "actual_terms": { # SkillAgent confirms the terms it accepts
+                    "reward_for_success": proposed_reward,
+                    "energy_cost_charged_to_task_agent": min(max_chargeable_cost, estimated_internal_cost + (proposed_reward - estimated_internal_cost) * 0.1), # Charge a bit more than cost if profitable
+                    "deadline_ticks": proposed_terms.get("deadline_ticks")
+                }
+            }
+        else:
+            reason = ""
+            if self.energy <= estimated_internal_cost: reason += "Insufficient energy. "
+            if not is_profitable: reason += "Offer not profitable. "
+            if not can_perform_capability: reason += f"Cannot perform '{capability_requested}'. "
+            log(f"[{self.name}] Evaluating TASK_OFFER for '{capability_requested}': REJECTING. Reason: {reason.strip()}", level="INFO")
+            return {
+                "response_type": "reject",
+                "reason": reason.strip()
+            }
+
+    def _handle_message(self, sender_id: str, message_content: Dict[str, Any]) -> bool:
+        """Handles a received message. Overrides BaseAgent to process skill requests and task offers."""
+        message_type = message_content.get('type')
+        payload = message_content.get('payload', {})
 
     def get_config(self) -> dict:
         base_config = super().get_config()
@@ -355,8 +394,127 @@ class SkillAgent(BaseAgent):
             "action": "skill_agent_run_start", 
             "age": self.age, 
             "energy": self.energy,
-            "memory_size": memory_size_at_run_start
+            "memory_size": memory_size_at_run_start,
         }
         if not hasattr(self, 'memory') or self.memory is None:
             self.memory = AgentMemory(agent_id=self.id)
         self.memory.log_tick(log_data_run_start) # Log the start of the run cycle
+
+    def _handle_message(self, sender_id: str, message_content: Dict[str, Any]) -> bool:
+        """Handles a received message. Overrides BaseAgent to process skill requests and task offers."""
+        message_type = message_content.get('type')
+        payload = message_content.get('payload', {})
+
+        if message_type == "TASK_OFFER":
+            negotiation_id = payload.get('negotiation_id')
+            requester_agent_id = payload.get('requester_agent_id')
+            capability_requested = payload.get('capability_requested')
+            tool_command_str = payload.get('tool_command_str')
+            proposed_terms = payload.get('proposed_terms')
+
+            log(f"[{self.name}] Received TASK_OFFER (NegID: {negotiation_id}) from '{requester_agent_id}' for '{capability_requested}'. Command: '{tool_command_str}'", level="INFO")
+
+            if not all([negotiation_id, requester_agent_id, capability_requested, tool_command_str, proposed_terms]):
+                log(f"[{self.name}] Invalid TASK_OFFER received, missing fields. Payload: {payload}", level="WARN")
+                # Optionally send a reject message with "bad_request"
+                return True # Handled (as a bad offer)
+
+            evaluation_result = self._evaluate_task_offer(proposed_terms, capability_requested, tool_command_str)
+
+            response_message = {
+                "type": "TASK_OFFER_RESPONSE",
+                "payload": {
+                    "negotiation_id": negotiation_id, # Echo back the ID
+                    "responder_agent_id": self.id,
+                    "response_type": evaluation_result["response_type"],
+                    "actual_terms": evaluation_result.get("actual_terms"),
+                    "reason": evaluation_result.get("reason")
+                },
+                "recipient_agent_id": requester_agent_id # Send back to original requester
+            }
+            self.communication_bus.send_direct_message(self.name, requester_agent_id, response_message)
+            log(f"[{self.name}] Sent TASK_OFFER_RESPONSE (NegID: {negotiation_id}) to '{requester_agent_id}'. Type: {evaluation_result['response_type']}", level="DEBUG")
+            return True # Message handled
+
+        # Existing skill execution request handling
+        intended_skill_action_category = message_content.get('action') # Used by older direct invocation
+        request_id = payload.get('request_id', message_content.get('request_id')) # Check payload first for consistency
+        params_from_message = payload.get('data', message_content.get('data', {}))
+
+        # Check if this message is a skill execution request (sent by invoke_skill_agent_v1 or after negotiation)
+        # The 'action' key might be used by direct invocations, while negotiated ones might use a different structure.
+        # For now, we assume 'tool_command_str' in params_from_message is the primary way to get the command.
+        if request_id and params_from_message.get("tool_command_str"): # More specific check for execution
+            log(f"[{self.name}] Identified skill execution request from {sender_id} (ReqID: {request_id}): Action Category '{intended_skill_action_category or 'N/A'}'", level="INFO")
+
+            actual_command_for_tool = params_from_message.get("tool_command_str")
+
+            if not actual_command_for_tool and intended_skill_action_category: # Fallback
+                log(f"[{self.name}] 'tool_command_str' not found. Using 'action' field ('{intended_skill_action_category}') as command. Data: {params_from_message}", level="DEBUG")
+                actual_command_for_tool = intended_skill_action_category
+
+            if actual_command_for_tool is None:
+                log(f"[{self.name}] Could not determine actual command for skill tool from message: {message_content}", level="WARN")
+                error_response = {
+                    "status": "failure_bad_request", "message": "SkillAgent could not determine command.",
+                    "data": None, "error": "Malformed skill request.", "request_id": request_id
+                }
+                if self.communication_bus: self.communication_bus.send_direct_message(self.name, sender_id, error_response)
+                return True
+
+            log(f"[{self.name}] Final command for tool '{self.skill_tool.skill_name}': '{actual_command_for_tool}'", level="DEBUG")
+            self.execute_skill_action(
+                skill_command_str=actual_command_for_tool,
+                params=params_from_message,
+                invoking_agent_id=sender_id,
+                task_id=request_id
+            )
+            return True
+
+        return super()._handle_message(sender_id, message_content)
+
+    # --- Dynamic Service Discovery Methods ---
+
+    def get_estimated_cost(self) -> float:
+        """
+        Placeholder for calculating the estimated energy cost for this agent's services.
+        Could be dynamic based on skill complexity or internal state.
+        """
+        # For now, a simple base cost, perhaps related to its base tick energy cost or a fixed value.
+        return self.base_tick_energy_cost * 5 + 0.1 # Example: 5 ticks worth of base cost + a small fixed fee
+
+    def get_current_load(self) -> float:
+        """
+        Placeholder for reporting current load. 0.0 (idle) to 1.0 (max capacity).
+        """
+        # This would require tracking active tasks or message queue length.
+        return 0.1 # Default to mostly idle for now
+
+    def get_reputation(self) -> float:
+        """
+        Placeholder for fetching/calculating the agent's reputation.
+        This could be based on successful task completions, user feedback, etc.
+        """
+        return 0.75 # Default to a decent reputation
+
+    def advertise_services(self):
+        """Broadcasts the agent's capabilities and service offerings."""
+        service_details = {
+            "estimated_cost_per_invocation": self.get_estimated_cost(),
+            "current_load_factor": self.get_current_load(),
+            "reputation_score": self.get_reputation(),
+            "skill_tool_name": self.skill_tool.skill_name if hasattr(self.skill_tool, 'skill_name') else "UnknownSkillTool"
+        }
+        advertisement_message = {
+            "type": "SERVICE_ADVERTISEMENT", # New message type for CommunicationBus
+            "payload": {
+                "agent_id": self.id, # Use self.id which is the unique agent_id
+                "agent_name": self.name,
+                "agent_type": self.agent_type,
+                "services_offered": list(self.capabilities), # self.capabilities lists the services it provides
+                "service_details": service_details,
+                "timestamp": self.context_manager.get_tick() # For freshness
+            }
+        }
+        self.communication_bus.publish_message(self.name, advertisement_message) # MetaAgent or ServiceRegistry would listen
+        log(f"Agent {self.name} (ID: {self.id}) advertised services: {list(self.capabilities)}. Details: {service_details}", level="INFO")

@@ -113,6 +113,7 @@ class TaskAgent(BaseAgent):
         self.state.setdefault('pending_llm_operations', {})
         self.state.setdefault('pending_skill_requests', {})
         self.last_diagnosis: Optional[Dict[str, Any]] = None
+        self.state.setdefault('pending_negotiations', {}) # For tracking skill offers
         self.conversation_history: List[Dict[str, str]] = []
 
         self.capability_performance_tracker = CapabilityPerformanceTracker(initial_capabilities=self.capabilities)
@@ -181,6 +182,69 @@ class TaskAgent(BaseAgent):
             return None
             
         return chosen_target_skill_agent_id
+
+    def _initiate_skill_negotiation(self,
+                                    target_skill_agent_id: str,
+                                    capability_name_requested: str, # e.g., "maths_operation"
+                                    tool_command_str_for_skill: str, # e.g., "add 1 2"
+                                    original_invoking_capability_request_id: str, # The request_id of the capability that initiated this negotiation
+                                    proposed_reward: float = 5.0,
+                                    max_acceptable_cost: float = 1.0,
+                                    deadline_ticks_from_now: int = 50
+                                    ) -> Optional[str]:
+        """
+        Sends a TASK_OFFER to a SkillAgent and tracks it.
+        Returns the negotiation_id (task_id for the offer) if successful, else None.
+        """
+        if not self.communication_bus:
+            log(f"[{self.name}] Cannot initiate negotiation: CommunicationBus not available.", level="ERROR")
+            return None
+
+        current_tick = self.context_manager.get_tick()
+        negotiation_id = f"neg_{self.id}_{current_tick}_{uuid.uuid4().hex[:6]}"
+
+        proposed_terms = {
+            "reward_for_success": proposed_reward,
+            "max_energy_cost_to_task_agent": max_acceptable_cost, # Max cost SkillAgent can charge TaskAgent
+            "deadline_ticks": current_tick + deadline_ticks_from_now
+        }
+
+        task_offer_message = {
+            "type": "TASK_OFFER", # New message type
+            "payload": {
+                "negotiation_id": negotiation_id, # Unique ID for this negotiation
+                "requester_agent_id": self.id,
+                "requester_agent_name": self.name,
+                "capability_requested": capability_name_requested, # The conceptual capability
+                "tool_command_str": tool_command_str_for_skill,   # The specific command for the tool
+                "proposed_terms": proposed_terms
+            },
+            "recipient_agent_id": target_skill_agent_id
+        }
+
+        success = self.communication_bus.send_direct_message(
+            sender_id=self.name, # TaskAgent's name
+            recipient_id=target_skill_agent_id,
+            message_content=task_offer_message
+        )
+
+        if success:
+            self.state['pending_negotiations'][negotiation_id] = {
+                "target_skill_agent_id": target_skill_agent_id,
+                "capability_requested": capability_name_requested,
+                "tool_command_str": tool_command_str_for_skill,
+                "proposed_terms": proposed_terms,
+                "status": "offer_sent",
+                "sent_at_tick": current_tick,
+                "original_invoking_capability_request_id": original_invoking_capability_request_id, # To link back
+                "timeout_at_tick": current_tick + deadline_ticks_from_now + 10 # Offer response timeout
+            }
+            log(f"[{self.name}] Sent TASK_OFFER (NegID: {negotiation_id}) for '{capability_name_requested}' to '{target_skill_agent_id}'. Proposed terms: {proposed_terms}", level="INFO")
+            return negotiation_id
+        else:
+            log(f"[{self.name}] Failed to send TASK_OFFER (NegID: {negotiation_id}) for '{capability_name_requested}' to '{target_skill_agent_id}'.", level="ERROR")
+            return None
+
 
     def _report_symptom(self, symptom_type: str, details_dict: Dict[str, Any], severity: str = "warning", symptom_id_prefix: str = "symptom"):
         current_tick = self.context_manager.get_tick()
@@ -519,6 +583,27 @@ class TaskAgent(BaseAgent):
                 if "success" in status.lower() and "success" in operational_status.lower():
                     reward_to_apply = req_details["success_reward"]
                     is_success = True
+
+                    # --- Add Inter-Agent Payment Logic ---
+                    # For now, using a placeholder agreed_reward.
+                    # In a more advanced system, this would come from negotiated terms
+                    # or the SkillAgent's advertised service cost.
+                    agreed_payment_amount = 5.0 # Placeholder for payment amount
+                    skill_agent_name_for_payment = req_details['target_skill_agent_id']
+                    task_id_for_payment = req_id
+
+                    log(f"[{self.name}] Attempting to pay SkillAgent '{skill_agent_name_for_payment}' {agreed_payment_amount} energy for successful task '{task_id_for_payment}'.", level="INFO")
+                    payment_successful = self.context_manager.process_inter_agent_energy_transfer(
+                        payer_agent_name=self.name,
+                        payee_agent_name=skill_agent_name_for_payment,
+                        amount=agreed_payment_amount,
+                        reason=f"Payment for successful completion of task {task_id_for_payment}"
+                    )
+                    if payment_successful:
+                        log(f"[{self.name}] Successfully paid {skill_agent_name_for_payment} {agreed_payment_amount} energy for task {task_id_for_payment}.")
+                    else:
+                        log(f"[{self.name}] Failed to pay {skill_agent_name_for_payment} for task {task_id_for_payment}. Check ContextManager logs.", level="WARN")
+                    # --- End Inter-Agent Payment Logic --- 
                 else:
                     failure_reason_detail = skill_operation_data.get("message", skill_operation_data.get("error", status))
                     log(f"[{self.name}] Skill request '{req_id}' to '{req_details['target_skill_agent_id']}' reported operational failure: {failure_reason_detail}", level="WARNING")
@@ -542,6 +627,88 @@ class TaskAgent(BaseAgent):
         for req_id in completed_request_ids:
             if req_id in self.state['pending_skill_requests']: 
                 del self.state['pending_skill_requests'][req_id]
+
+    def _handle_negotiation_responses(self):
+        """Handles responses to TASK_OFFERs."""
+        current_tick = self.context_manager.get_tick()
+        if not self.state.get('pending_negotiations'):
+            return
+
+        resolved_negotiation_ids = []
+        for neg_id, neg_details in list(self.state['pending_negotiations'].items()):
+            if neg_details["status"] != "offer_sent": # Already processed or timed out
+                if current_tick >= neg_details.get("timeout_at_tick", float('inf')) and neg_details["status"] == "offer_sent":
+                    log(f"[{self.name}] Negotiation '{neg_id}' with '{neg_details['target_skill_agent_id']}' for '{neg_details['capability_requested']}' timed out waiting for response.", level="WARNING")
+                    # TODO: Update RL/performance for the invoking capability that initiated this negotiation
+                    resolved_negotiation_ids.append(neg_id)
+                continue
+
+            # Check for response message from SkillAgent
+            # Assuming TASK_OFFER_RESPONSE messages are direct and have 'negotiation_id' in payload
+            response_message = self.communication_bus.get_message_by_request_id(
+                recipient_agent_name=self.name, # Messages are for me
+                request_id_to_find=neg_id,      # Match by negotiation_id
+                message_type_filter="TASK_OFFER_RESPONSE" # New filter for comms bus
+            )
+
+            if response_message:
+                response_payload = response_message['content'].get('payload', {})
+                response_type = response_payload.get('response_type')
+                log(f"[{self.name}] Received TASK_OFFER_RESPONSE for NegID '{neg_id}' from '{response_payload.get('responder_agent_id')}'. Type: {response_type}", level="INFO")
+ 
+                if response_type == "accept":
+                    neg_details["status"] = "accepted"
+                    actual_terms = response_payload.get("actual_terms", neg_details["proposed_terms"])
+                    log(f"[{self.name}] Offer NegID '{neg_id}' ACCEPTED by '{neg_details['target_skill_agent_id']}' for '{neg_details['capability_requested']}'. Agreed terms: {actual_terms}", level="INFO")
+ 
+                    # --- Initiate actual skill execution based on accepted negotiation ---
+                    skill_execution_request_id = neg_details.get("original_invoking_capability_request_id", f"skill_req_{neg_id}")
+ 
+                    # Prepare the message for the SkillAgent
+                    skill_execution_message_content = {
+                        "action": neg_details["capability_requested"], # The conceptual capability
+                        "request_id": skill_execution_request_id,
+                        "data": { # This is the 'params_from_message' for SkillAgent
+                            "tool_command_str": neg_details["tool_command_str"],
+                            # Pass other relevant data if needed by the skill tool
+                        }
+                    }
+ 
+                    # Store in pending_skill_requests, including the agreed terms for payment
+                    self.state['pending_skill_requests'][skill_execution_request_id] = {
+                        "target_skill_agent_id": neg_details["target_skill_agent_id"],
+                        "capability_name": neg_details["capability_requested"], # Or a more generic "negotiated_skill_invocation"
+                        "request_data": skill_execution_message_content['data'], # What was sent to skill agent
+                        "original_rl_state": self.state.get("last_rl_state_before_action", self._get_rl_state_representation()), # Use a recent RL state
+                        "success_reward": actual_terms.get("reward_for_success", 1.0), # Default reward if not in terms
+                        "failure_reward": -1.0, # Default failure penalty
+                        "timeout_reward": -0.5, # Default timeout penalty
+                        "timeout_at_tick": self.context_manager.get_tick() + actual_terms.get("deadline_ticks", 50) - self.context_manager.get_tick() + 10, # From agreed deadline
+                        "agreed_terms": actual_terms # Store the actual agreed terms for payment
+                    }
+ 
+                    # Send the skill execution command to the SkillAgent
+                    self.communication_bus.send_direct_message(
+                        sender_id=self.name,
+                        recipient_id=neg_details["target_skill_agent_id"],
+                        message_content=skill_execution_message_content
+                    )
+                    log(f"[{self.name}] Sent skill execution request (ReqID: {skill_execution_request_id}) to '{neg_details['target_skill_agent_id']}' after accepted negotiation (NegID: {neg_id}).", level="INFO")
+                    # --- End skill execution initiation ---
+                elif response_type == "reject":
+                    neg_details["status"] = "rejected"
+                    log(f"[{self.name}] Offer NegID '{neg_id}' REJECTED by '{neg_details['target_skill_agent_id']}'. Reason: {response_payload.get('reason')}", level="INFO")
+                # TODO: Handle "counter_offer"
+                
+                self.communication_bus.mark_message_processed(response_message['id'])
+                resolved_negotiation_ids.append(neg_id)
+            
+            elif current_tick >= neg_details.get("timeout_at_tick", float('inf')):
+                 log(f"[{self.name}] Negotiation '{neg_id}' with '{neg_details['target_skill_agent_id']}' for '{neg_details['capability_requested']}' timed out waiting for response (checked after get_message_by_request_id).", level="WARNING")
+                 resolved_negotiation_ids.append(neg_id)
+
+        for neg_id in resolved_negotiation_ids:
+            self.state['pending_negotiations'].pop(neg_id, None)
 
     def _handle_pending_llm_operations(self):
         current_tick = self.context_manager.get_tick()
@@ -791,6 +958,7 @@ class TaskAgent(BaseAgent):
         
         self._handle_pending_skill_responses()
         self._handle_pending_llm_operations()
+        self._handle_negotiation_responses() # Handle negotiation responses
         
         chosen_capability_name: Optional[str] = None
         cap_inputs_for_execution: Dict[str, Any] = {}

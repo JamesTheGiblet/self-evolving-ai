@@ -246,3 +246,48 @@ class ContextManager:
     def set_identity_engine(self, identity_engine_instance: 'IdentityEngine'): # If set separately
         self.identity_engine = identity_engine_instance
         log("[ContextManager] IdentityEngine reference set directly.", level="DEBUG")
+
+    def process_inter_agent_energy_transfer(self,
+                                            payer_agent_name: str,
+                                            payee_agent_name: str,
+                                            amount: float,
+                                            reason: str) -> bool:
+        """
+        Processes an energy transfer between two agents.
+
+        Args:
+            payer_agent_name: The name/ID of the agent paying the energy.
+            payee_agent_name: The name/ID of the agent receiving the energy.
+            amount: The amount of energy to transfer. Must be positive.
+            reason: A string describing the reason for the transfer (e.g., "payment_for_task_X").
+
+        Returns:
+            True if the transfer was successful, False otherwise.
+        """
+        if amount <= 0:
+            log(f"[ContextManager] Energy transfer failed: Amount must be positive. Attempted to transfer {amount} from {payer_agent_name} to {payee_agent_name}.", level="WARN")
+            return False
+
+        if not self.meta_agent or not hasattr(self.meta_agent, 'agents'):
+            log(f"[ContextManager] Energy transfer failed: MetaAgent or agent list not available.", level="ERROR")
+            return False
+
+        payer_agent = next((agent for agent in self.meta_agent.agents if agent.name == payer_agent_name), None)
+        payee_agent = next((agent for agent in self.meta_agent.agents if agent.name == payee_agent_name), None)
+
+        if not payer_agent:
+            log(f"[ContextManager] Energy transfer failed: Payer agent '{payer_agent_name}' not found.", level="WARN")
+            return False
+        if not payee_agent:
+            log(f"[ContextManager] Energy transfer failed: Payee agent '{payee_agent_name}' not found.", level="WARN")
+            return False
+
+        if payer_agent.energy < amount:
+            log(f"[ContextManager] Energy transfer failed: Payer '{payer_agent_name}' has insufficient energy ({payer_agent.energy:.2f}) to transfer {amount:.2f}.", level="INFO")
+            return False
+
+        payer_agent.energy -= amount
+        payee_agent.energy += amount
+
+        log(f"[ContextManager] Energy transfer successful: {amount:.2f} from '{payer_agent_name}' (new energy: {payer_agent.energy:.2f}) to '{payee_agent_name}' (new energy: {payee_agent.energy:.2f}). Reason: {reason}.", level="INFO")
+        return True

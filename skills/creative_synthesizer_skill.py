@@ -1,10 +1,10 @@
 # skills/creative_synthesizer_skill.py
 
 import json
-import datetime
+import datetime # Keep this import
 from typing import Dict, Any, List, TYPE_CHECKING, Optional
 
-from skills.base_skill import BaseSkillTool
+from base_skill import BaseSkillTool
 from utils.logger import log
 
 # For type hinting core components to avoid circular imports at runtime
@@ -199,6 +199,14 @@ class CreativeSynthesizerSkill(BaseSkillTool):
 if __name__ == "__main__":
     # This section is for testing the skill independently.
     # It will not be executed when the skill is loaded by an agent.
+
+    # --- Add project root to sys.path for direct execution ---
+    import sys
+    import os
+    PROJECT_ROOT_FOR_TESTING = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if PROJECT_ROOT_FOR_TESTING not in sys.path:
+        sys.path.insert(0, PROJECT_ROOT_FOR_TESTING)
+    # --- End of sys.path modification ---
     print("Testing CreativeSynthesizerSkill (mock initialization)...")
 
     # Mock dependencies for local testing
@@ -211,6 +219,22 @@ if __name__ == "__main__":
     mock_cm = object()
     mock_cb = object()
 
+    # Mock LLMInterface for testing summarize_creatively
+    class MockLLMInterface:
+        def call_llm_api(self, messages: List[Dict[str, str]], model_name: Optional[str] = None) -> Optional[str]:
+            log("[MockLLMInterface] call_llm_api called", level="DEBUG")
+            # Find the user prompt to make the mock response somewhat relevant
+            user_content = "No user content found in mock."
+            for msg in messages:
+                if msg.get("role") == "user":
+                    user_content = msg.get("content", "")
+                    break
+            if "summarize" in user_content.lower():
+                return f"A mock creative summary of: '{user_content[:50]}...'"
+            return "Mock LLM response."
+
+    mock_llm = MockLLMInterface()
+
     try:
         skill_instance = CreativeSynthesizerSkill(
             skill_config=mock_skill_config_data,
@@ -218,8 +242,10 @@ if __name__ == "__main__":
             context_manager=mock_cm, # type: ignore
             communication_bus=mock_cb, # type: ignore
             agent_name="TestSynthesizerAgent",
-            agent_id="test-synthesizer-agent-001"
+            agent_id="test-synthesizer-agent-001",
+            llm_interface=mock_llm # Pass the mock LLMInterface
         )
+
 
         print("\nCapabilities:")
         print(json.dumps(skill_instance.get_capabilities(), indent=2))
