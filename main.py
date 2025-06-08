@@ -33,22 +33,40 @@ def shutdown_handler(signum, frame):
     Attempts to close the GUI if running, otherwise stops the context manager.
     """
     log(f"Signal {signum} received. Initiating graceful shutdown...")
+    gui_closed_by_this_handler = False
     if app_gui_instance and hasattr(app_gui_instance, 'on_closing') and callable(app_gui_instance.on_closing):
-        if app_gui_instance.winfo_exists() and not app_gui_instance._is_closing:
-            log("Attempting to close GUI gracefully via after()...")
-            app_gui_instance.after(0, app_gui_instance.on_closing)
-        elif not app_gui_instance.winfo_exists():
-            log("GUI instance no longer exists. Attempting direct context stop.", level="WARN")
-            if global_context_manager_instance and hasattr(global_context_manager_instance, 'stop') and callable(global_context_manager_instance.stop):
+        try:
+            if app_gui_instance.winfo_exists():  # Check if window object still exists
+                if not app_gui_instance._is_closing:
+                    log("Attempting to close GUI gracefully by scheduling on_closing()...")
+                    # Schedule on_closing to be run in the GUI's main thread
+                    app_gui_instance.after(0, app_gui_instance.on_closing)
+                    gui_closed_by_this_handler = True
+                else:
+                    log("GUI is already in the process of closing. Signal handler will not intervene further with GUI.")
+            else:
+                log("GUI window object no longer exists. Will attempt to stop ContextManager directly if needed.", level="WARN")
+        except Exception as e:  # Catch potential TclError if GUI is in a bad state
+            log(f"Error interacting with GUI during shutdown: {e}. Will attempt to stop ContextManager directly.", level="ERROR")
+
+    if not gui_closed_by_this_handler:
+        # This block runs if GUI wasn't told to close by this handler invocation,
+        # or if there was an issue with the GUI.
+        log("GUI not closed by this handler or GUI unavailable/error. Checking ContextManager.", level="INFO")
+        if global_context_manager_instance and \
+           hasattr(global_context_manager_instance, 'is_running') and \
+           callable(global_context_manager_instance.is_running) and \
+           global_context_manager_instance.is_running():
+            log("Attempting to stop ContextManager directly.", level="WARN")
+            if hasattr(global_context_manager_instance, 'stop') and callable(global_context_manager_instance.stop):
                 global_context_manager_instance.stop()
-            sys.exit(0)
+            else:
+                log("ContextManager does not have a callable stop method.", level="ERROR")
+        elif global_context_manager_instance:
+            log("ContextManager exists but is not running or is_running not callable.", level="INFO")
         else:
-            log("GUI is already in the process of closing.", level="INFO")
-    else:
-        log("GUI instance not available or on_closing not callable. Attempting direct context stop and exit.", level="WARN")
-        if global_context_manager_instance and hasattr(global_context_manager_instance, 'stop') and callable(global_context_manager_instance.stop):
-            global_context_manager_instance.stop()
-        sys.exit(0)
+            log("Global ContextManager instance not available for direct stop.", level="WARN")
+    # The program should exit naturally when mainloop terminates and main() function completes.
 
 def main():
     global global_context_manager_instance, app_gui_instance
