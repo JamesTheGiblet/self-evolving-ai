@@ -1,0 +1,8 @@
+.\.venv\Scripts\Activate.ps1
+
+python -m pip install matplotlib
+pip install dotenv
+pip install requests
+pip install numpy 
+pip install flask 
+pip install customtkinter
