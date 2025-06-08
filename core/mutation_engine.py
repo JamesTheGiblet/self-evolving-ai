@@ -3,11 +3,13 @@
 import random
 import copy
 from typing import Dict, List, Any, Callable, TYPE_CHECKING, Optional
+import ast # For parsing code to find stubs
+import sys # For ast.unparse check
 
 from core.agent_base import BaseAgent
 from engine.fitness_engine import FitnessEngine
 from utils.logger import log
-from core.capability_registry import CAPABILITY_REGISTRY
+from core.capability_registry import CAPABILITY_REGISTRY # Ensure this is used or remove if not
 import config as global_config # Import the main config file
 from agents.code_gen_agent import CodeGenAgent # For type hinting
 if TYPE_CHECKING:
@@ -62,6 +64,10 @@ class MutationEngine:
         self.DEFAULT_SKILL_LINEAGE_BASES = list(set(
             cfg.get('lineage_id', 'unknown_lineage') # Default to 'unknown_lineage' if somehow missing
             for cfg in self.meta_agent.default_skill_configs_by_lineage.values() if cfg and cfg.get('lineage_id')))
+        
+        # For asynchronous code generation
+        self.pending_code_generation_requests: Dict[str, Dict[str, Any]] = {}
+        self.code_gen_request_timeout_ticks = int(global_config.LOCAL_LLM_REQUEST_TIMEOUT / (global_config.TICK_INTERVAL if global_config.TICK_INTERVAL > 0 else 1.0)) + 10 # Add buffer
         self.code_gen_agent: Optional[CodeGenAgent] = None
         log("[MutationEngine] Initialized.")
 
@@ -438,47 +444,14 @@ class MutationEngine:
         else:
             log(f"[MutationEngine] Agent '{agent_config.get('name')}' has no behavior_mode in config. Cannot update performance.", level="WARNING")
 
-    def _attempt_code_generation_for_evolution(self, base_agent_config: Dict[str, Any]):
-        """
-        Attempts to use CodeGenAgent to generate a new or evolved skill.
-        """
-        if not self.code_gen_agent:
-            log("[MutationEngine] CodeGenAgent not available, skipping code generation attempt.", level="DEBUG")
-            return
-
-        agent_type = base_agent_config.get("agent_type", "unknown")
-        original_description = base_agent_config.get("description", f"A {agent_type} agent with capabilities: {base_agent_config.get('capabilities', [])}")
-        
-        # Simple example: try to add a new related feature
-        new_feature_ideas = ["perform advanced statistical calculations", "integrate with a calendar API", "parse complex data formats", "generate creative text summaries", "control a virtual robot arm"]
-        added_feature_request = random.choice(new_feature_ideas)
-
-        prompt_description = (
-            f"Generate Python code for a new standalone skill module. This skill should be an evolution of, or inspired by, "
-            f"a concept described as: '{original_description}'.\n"
-            f"The key new functionality to incorporate is: '{added_feature_request}'.\n"
-            f"The skill should be encapsulated in one or more Python functions or a class."
-        )
-        
-        guidelines = (
-            "The generated Python code should be functional and include docstrings. "
-            "If it's a class, it should have an `execute(command_string)` method. "
-            "If it's a function, ensure it's clearly named based on its primary new capability. "
-            "Only output the raw Python code."
-        )
-
-        log(f"[MutationEngine] Attempting code generation for evolved skill based on '{base_agent_config.get('name')}'. New feature: '{added_feature_request}'", level="INFO")
-        generated_code = self.code_gen_agent.write_new_capability(prompt_description, guidelines)
-
-        log(f"[MutationEngine] CodeGenAgent response for evolved skill (based on '{base_agent_config.get('name')}'):\n{generated_code}", level="INFO" if generated_code else "WARN")
-        # TODO: Next steps would be to validate, test, and integrate this generated_code.
-        # For now, we just log it.
-
     def run_assessment_and_mutation(self):
+        # First, handle any pending asynchronous code generation responses
+        self._handle_pending_code_generation_responses()
+
         current_tick = self.context.get_tick()
         log(f"MutationEngine: Starting assessment and mutation cycle (Tick {current_tick})...")
 
-        if current_tick > 0 and current_tick % 100 == 0:
+        if current_tick > 0 and current_tick % 100 == 0: # TODO: Make this configurable
             self.last_agent_fitness_scores.clear() # Clear old scores on decay/reset
             log("[MutationEngine] Decaying behavior mode performance statistics...")
             decay_factor = 0.9
@@ -549,8 +522,9 @@ class MutationEngine:
                 mutated_config = self.mutate_config(selected_config, "task", all_current_agent_names) # Pass agent_type
                 new_task_agent_configs.append(mutated_config)
                 # Attempt radical code generation based on the mutated config
-                if random.random() < 0.1: # 10% chance
-                    self._attempt_code_generation_for_evolution(mutated_config)
+                # This is now asynchronous, so it won't block the mutation cycle.
+                if random.random() < 0.05: # Reduced chance for demo, adjust as needed
+                    self._attempt_code_generation_for_evolution(mutated_config, current_tick)
                 log(f"  - Agent '{selected_config['name']}' selected and mutated for next generation.")
         else:
             log("MutationEngine: No Task Agents to mutate.", level="INFO")
@@ -587,8 +561,9 @@ class MutationEngine:
                 mutated_config = self.mutate_config(selected_config, "skill", all_current_agent_names) # Pass agent_type
                 new_skill_agent_configs.append(mutated_config)
                 # Attempt radical code generation based on the mutated config
-                if random.random() < 0.1: # 10% chance
-                    self._attempt_code_generation_for_evolution(mutated_config)
+                # This is now asynchronous.
+                if random.random() < 0.05: # Reduced chance for demo
+                    self._attempt_code_generation_for_evolution(mutated_config, current_tick)
                 log(f"  - Skill Agent '{selected_config['name']}' selected and mutated for next generation.")
         else:
             log("MutationEngine: No Skill Agents assessed or selected for mutation based on fitness.", level="INFO")
@@ -694,3 +669,321 @@ class MutationEngine:
                 self.meta_agent.add_agent_from_config(copy.deepcopy(skill_config))
 
         log("MutationEngine: Assessment and mutation cycle finished.")
+
+    def _attempt_code_generation_for_evolution(self, base_agent_config: Dict[str, Any], current_tick: int):
+        """
+        Initiates an asynchronous CodeGenAgent request to generate a new or evolved skill.
+        """
+        if not self.code_gen_agent:
+            log("[MutationEngine] CodeGenAgent not available, skipping code generation attempt.", level="DEBUG")
+            return
+
+        agent_type = base_agent_config.get("agent_type", "unknown")
+        original_description = base_agent_config.get("description", f"A {agent_type} agent with capabilities: {base_agent_config.get('capabilities', [])}")
+        
+        new_feature_ideas = ["perform advanced statistical calculations", "integrate with a calendar API", "parse complex data formats", "generate creative text summaries", "control a virtual robot arm"]
+        added_feature_request = random.choice(new_feature_ideas)
+
+        prompt_description = (
+            f"Generate Python code for a new standalone skill module. This skill should be an evolution of, or inspired by, "
+            f"a concept described as: '{original_description}'.\n"
+            f"The key new functionality to incorporate is: '{added_feature_request}'.\n"
+            f"The skill should be encapsulated in one or more Python functions or a class."
+        )
+        
+        guidelines = (
+            "The generated Python code should be functional and include docstrings. "
+            "If it's a class, it should have an `execute(command_string)` method. "
+            "If it's a function, ensure it's clearly named based on its primary new capability. "
+            "Only output the raw Python code."
+        )
+
+        log(f"[MutationEngine] Attempting ASYNC code generation for evolved skill based on '{base_agent_config.get('name')}'. New feature: '{added_feature_request}'", level="INFO")
+        
+        request_id = self.code_gen_agent.write_new_capability(prompt_description, guidelines)
+
+        if request_id:
+            self.pending_code_generation_requests[request_id] = {
+                "type": "skeleton_generation", # Mark this as a skeleton generation request
+                "base_agent_name": base_agent_config.get("name"),
+                "requested_feature": added_feature_request,
+                "initiated_at_tick": current_tick,
+                "timeout_at_tick": current_tick + self.code_gen_request_timeout_ticks,
+                "request_id": request_id # Store the request_id for linking stub requests
+            }
+            log(f"[MutationEngine] Code generation request '{request_id}' sent for agent evolution based on '{base_agent_config.get('name')}'.", level="INFO")
+        else:
+            log(f"[MutationEngine] Failed to send code generation request for agent evolution based on '{base_agent_config.get('name')}'.", level="ERROR")
+
+    def _analyze_code_for_stubs(self, code_string: str) -> List[Dict[str, Any]]:
+        """
+        Analyzes Python code string using AST to find function/method stubs
+        that only contain a 'pass' statement or a docstring followed by 'pass'.
+        Returns a list of dictionaries, each describing a stub.
+        """
+        stubs = []
+        if not code_string:
+            return stubs
+        try:
+            tree = ast.parse(code_string)
+            
+            def get_full_signature_from_node(node: ast.FunctionDef, parent_code: str) -> str:
+                """
+                Extracts the full signature line (def name(args):) from the AST node.
+                Relies on ast.get_source_segment for accuracy.
+                """
+                try:
+                    # Attempt to get the source segment for the function definition
+                    # up to the colon. This is more robust for complex signatures.
+                    # We need to find the end of the signature (the ':').
+                    # The node.lineno and node.col_offset give the start of 'def'.
+                    # node.end_lineno and node.end_col_offset give the end of the entire function.
+                    
+                    # Get the lines of the function
+                    func_lines = ast.get_source_segment(parent_code, node).splitlines()
+                    signature_line = ""
+                    for line in func_lines:
+                        stripped_line = line.strip()
+                        if signature_line: # If we've started accumulating the signature
+                            signature_line += " " + stripped_line # Add subsequent lines of a multi-line signature
+                        else:
+                            signature_line = stripped_line
+
+                        if stripped_line.endswith(":"):
+                            break # Found the end of the signature
+                    
+                    return signature_line if signature_line.startswith("def ") or signature_line.startswith("async def ") else f"def {node.name}(...): # Fallback"
+
+                except Exception as e_sig:
+                    log(f"[MutationEngine] Error getting source segment for signature of {node.name}: {e_sig}", level="WARN")
+                    return f"def {node.name}(...): # Signature reconstruction fallback"
+
+            def get_docstring_from_node(node: ast.FunctionDef) -> Optional[str]:
+                return ast.get_docstring(node, clean=False) # clean=False preserves indentation for LLM
+
+            for item in tree.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)): # Top-level functions or async functions
+                    is_stub = False
+                    # Check if body is just 'pass' or a docstring followed by 'pass'
+                    if len(item.body) == 1 and isinstance(item.body[0], ast.Pass):
+                        is_stub = True
+                    elif len(item.body) >= 1 and isinstance(item.body[0], ast.Expr) and \
+                         isinstance(item.body[0].value, (ast.Constant, ast.Str)) and \
+                         (len(item.body) == 1 or (len(item.body) == 2 and isinstance(item.body[1], ast.Pass))):
+                        # This handles docstring only, or docstring + pass
+                        if len(item.body) == 2 and not isinstance(item.body[1], ast.Pass): # Docstring + something else not pass
+                            is_stub = False
+                        else: # Docstring only, or docstring + pass
+                            is_stub = True 
+
+                    if is_stub:
+                        stubs.append({
+                            "name": item.name,
+                            "signature": get_full_signature_from_node(item, code_string),
+                            "docstring": get_docstring_from_node(item),
+                            "class_context_code": None, # No class context for top-level functions
+                            "is_method": False,
+                            "node_lineno": item.lineno # For later integration
+                        })
+                elif isinstance(item, ast.ClassDef):
+                    class_source_segment = ast.get_source_segment(code_string, item) # Get source of the whole class
+                    for sub_item in item.body:
+                        if isinstance(sub_item, (ast.FunctionDef, ast.AsyncFunctionDef)): # Methods in class
+                            is_stub = False
+                            if len(sub_item.body) == 1 and isinstance(sub_item.body[0], ast.Pass):
+                                is_stub = True
+                            elif len(sub_item.body) >= 1 and isinstance(sub_item.body[0], ast.Expr) and \
+                                 isinstance(sub_item.body[0].value, (ast.Constant, ast.Str)) and \
+                                 (len(sub_item.body) == 1 or (len(sub_item.body) == 2 and isinstance(sub_item.body[1], ast.Pass))):
+                                if len(sub_item.body) == 2 and not isinstance(sub_item.body[1], ast.Pass):
+                                    is_stub = False
+                                else:
+                                    is_stub = True
+                                
+                            if is_stub:
+                                stubs.append({
+                                    "name": sub_item.name,
+                                    "signature": get_full_signature_from_node(sub_item, class_source_segment or code_string),
+                                    "docstring": get_docstring_from_node(sub_item),
+                                    "class_context_code": class_source_segment,
+                                    "is_method": True,
+                                    "node_lineno": sub_item.lineno # For later integration
+                                })
+        except SyntaxError as e:
+            log(f"[MutationEngine] Syntax error analyzing code for stubs: {e}. Code: {code_string[:200]}", level="ERROR")
+        except Exception as e:
+            log(f"[MutationEngine] Error analyzing code for stubs: {e}. Code: {code_string[:200]}", level="ERROR", exc_info=True)
+        return stubs
+
+    def _initiate_stub_implementation_requests(self, skeleton_code: str, stubs_info: List[Dict[str, Any]], original_request_details: Dict[str, Any], current_tick: int):
+        """Initiates asynchronous LLM calls to implement identified stubs."""
+        if not self.code_gen_agent or not stubs_info:
+            return
+
+        overall_skill_goal = f"Evolved skill based on {original_request_details.get('base_agent_name', 'unknown_base')}, new feature: {original_request_details.get('requested_feature', 'unknown_feature')}"
+
+        for stub in stubs_info:
+            request_id = self.code_gen_agent.implement_function_body_async(
+                function_signature=stub["signature"],
+                class_context=stub.get("class_context_code"),
+                docstring=stub.get("docstring"),
+                overall_skill_goal=overall_skill_goal
+            )
+            if request_id:
+                self.pending_code_generation_requests[request_id] = {
+                    "type": "stub_implementation",
+                    "original_skeleton_code": skeleton_code, # Store the skeleton this stub belongs to
+                    "stub_signature": stub["signature"], # Identify which stub this is for
+                    "stub_name": stub["name"],
+                    "is_method": stub["is_method"],
+                    "class_context_code_if_method": stub.get("class_context_code"),
+                    "node_lineno": stub.get("node_lineno"), # Store line number for AST integration
+                    "base_agent_name": original_request_details.get("base_agent_name"),
+                    "initiated_at_tick": current_tick,
+                    "timeout_at_tick": current_tick + self.code_gen_request_timeout_ticks,
+                    "parent_request_id": original_request_details.get("request_id") # Link to the skeleton request
+                }
+                log(f"[MutationEngine] Stub implementation request '{request_id}' sent for '{stub['name']}'.", level="INFO")
+            else:
+                log(f"[MutationEngine] Failed to send stub implementation request for '{stub['name']}'.", level="ERROR")
+
+    def _integrate_method_body_ast(self, skeleton_code: str, target_func_name: str, target_func_lineno: int, new_body_code_str: str) -> str:
+        """
+        Integrates the new_body_code_str into the skeleton_code for a specific function
+        identified by name and line number, using AST manipulation.
+        """
+        log(f"[MutationEngine] AST Integration: Attempting to integrate body for '{target_func_name}' at line {target_func_lineno}.", level="DEBUG")
+        try:
+            skeleton_ast = ast.parse(skeleton_code)
+            
+            # The new_body_code_str is just the *body*, not a full function.
+            # We need to parse it as if it were inside a dummy function to get its AST nodes.
+            # Ensure it's correctly indented if it's multi-line.
+            # A common way is to wrap it in a dummy function for parsing.
+            # The LLM is prompted to provide the body already indented if it's for a method.
+            # If it's not indented, we might need to adjust.
+            # For now, assume the LLM provides the body correctly formatted.
+            
+            # A simple way to parse a block of statements:
+            # Wrap in a dummy function, parse, then extract the body.
+            # Ensure the body string doesn't have leading/trailing newlines that mess up parsing.
+            new_body_code_str = new_body_code_str.strip()
+            if not new_body_code_str: # If LLM returned empty body
+                log(f"[MutationEngine] AST Integration: LLM returned empty body for '{target_func_name}'. No changes made.", level="WARN")
+                return skeleton_code
+
+            # Create a dummy function string for parsing the body
+            # The indentation of new_body_code_str matters here.
+            # If the LLM provides it unindented:
+            indented_new_body_lines = [f"    {line}" for line in new_body_code_str.splitlines()]
+            dummy_func_for_body_parsing = f"def __dummy_func_for_body_parsing__():\n" + "\n".join(indented_new_body_lines)
+            
+            try:
+                body_ast_module = ast.parse(dummy_func_for_body_parsing)
+                if not body_ast_module.body or not isinstance(body_ast_module.body[0], (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    raise ValueError("Could not parse new body into a function definition.")
+                new_body_nodes = body_ast_module.body[0].body
+            except SyntaxError as se:
+                log(f"[MutationEngine] AST Integration: Syntax error parsing new body for '{target_func_name}': {se}. Body: \n{new_body_code_str}", level="ERROR")
+                return skeleton_code # Return original on error
+
+            target_node_found = False
+            for node in ast.walk(skeleton_ast):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and \
+                   node.name == target_func_name and \
+                   node.lineno == target_func_lineno:
+                    
+                    # Preserve docstring if it exists and new body doesn't have one
+                    original_docstring_node = None
+                    if node.body and isinstance(node.body[0], ast.Expr) and \
+                       isinstance(node.body[0].value, (ast.Constant, ast.Str)):
+                        original_docstring_node = node.body[0]
+
+                    new_body_has_docstring = False
+                    if new_body_nodes and isinstance(new_body_nodes[0], ast.Expr) and \
+                       isinstance(new_body_nodes[0].value, (ast.Constant, ast.Str)):
+                        new_body_has_docstring = True
+
+                    final_body_nodes = []
+                    if original_docstring_node and not new_body_has_docstring:
+                        final_body_nodes.append(original_docstring_node)
+                    
+                    final_body_nodes.extend(new_body_nodes)
+                    
+                    node.body = final_body_nodes
+                    target_node_found = True
+                    log(f"[MutationEngine] AST Integration: Successfully replaced body for '{target_func_name}' at line {target_func_lineno}.", level="INFO")
+                    break
+            
+            if not target_node_found:
+                log(f"[MutationEngine] AST Integration: Could not find target function '{target_func_name}' at line {target_func_lineno} in skeleton AST.", level="ERROR")
+                return skeleton_code
+
+            if sys.version_info >= (3, 9):
+                return ast.unparse(skeleton_ast)
+            else:
+                import astor # Requires astor to be installed for Python < 3.9
+                return astor.to_source(skeleton_ast)
+
+        except Exception as e:
+            log(f"[MutationEngine] AST Integration: Error integrating method body for '{target_func_name}': {e}", level="ERROR", exc_info=True)
+            return skeleton_code # Return original on error
+
+    def _handle_pending_code_generation_responses(self):
+        """Checks for and processes responses to asynchronous code generation requests."""
+        if not self.pending_code_generation_requests:
+            return
+
+        current_tick = self.context.get_tick()
+        completed_request_ids = []
+
+        for req_id, req_details in list(self.pending_code_generation_requests.items()):
+            if current_tick >= req_details["timeout_at_tick"]:
+                log(f"[MutationEngine] Code generation request '{req_id}' for '{req_details['base_agent_name']}' timed out.", level="WARN")
+                completed_request_ids.append(req_id)
+                continue
+
+            llm_response_data = self.context.get_llm_response_if_ready(req_id)
+            if llm_response_data and llm_response_data.get("status") != "pending":
+                raw_content = llm_response_data.get("response")
+                is_stub_implementation_response = req_details.get("type") == "stub_implementation"
+
+                if llm_response_data.get("status") == "completed" and raw_content:
+                    # Use the static method from LLMInterface for parsing
+                    from agents.code_gen_agent import LLMInterface # Ensure import
+                    parsed_content = LLMInterface.parse_llm_code_output(raw_content)
+
+                    if is_stub_implementation_response:
+                        log(f"[MutationEngine] Received Implemented Body for stub '{req_details['stub_name']}' (ReqID '{req_id}'):\n{parsed_content}", level="INFO")
+                        original_skeleton = req_details.get("original_skeleton_code")
+                        
+                        refined_code = self._integrate_method_body_ast(
+                            skeleton_code=original_skeleton,
+                            target_func_name=req_details["stub_name"],
+                            target_func_lineno=req_details["node_lineno"],
+                            new_body_code_str=parsed_content
+                        )
+                        log(f"[MutationEngine] Code after attempting AST integration for stub '{req_details['stub_name']}':\n{refined_code}", level="DEBUG")
+                        
+                        # TODO: Update the 'original_skeleton_code' for the parent_request_id (if managing multi-stub skills)
+                        # For now, we log and assume this refined_code is the one to potentially validate/test.
+                        # If all stubs for a parent_request_id are done, then the parent request is truly complete.
+                        log(f"Further refined code for {req_details['base_agent_name']} (feature: {req_details.get('requested_feature', 'N/A')}):\n{refined_code}", level="INFO")
+                        # Here, you'd eventually trigger the validation/testing/integration of `refined_code`.
+
+                    else: # It's an initial skeleton
+                        log(f"[MutationEngine] Received Skeleton Code for ReqID '{req_id}' (Base: {req_details['base_agent_name']}, Feature: {req_details['requested_feature']}):\n{parsed_content}", level="INFO")
+                        stubs = self._analyze_code_for_stubs(parsed_content)
+                        if stubs:
+                            log(f"[MutationEngine] Found {len(stubs)} stubs in skeleton for '{req_details['base_agent_name']}'. Initiating implementation requests.", level="INFO")
+                            self._initiate_stub_implementation_requests(parsed_content, stubs, req_details, current_tick)
+                        else:
+                            log(f"[MutationEngine] No stubs found in skeleton for '{req_details['base_agent_name']}'. Proceeding with integration of skeleton.", level="INFO")
+                            # TODO: Implement validation, testing, and integration of 'parsed_content' (the complete skeleton)
+                elif llm_response_data.get("status") == "error":
+                    log(f"[MutationEngine] Code generation request '{req_id}' for '{req_details['base_agent_name']}' failed. Error: {llm_response_data.get('error_details')}", level="ERROR")
+                
+                completed_request_ids.append(req_id) # Mark this specific request (skeleton or stub) as processed for this cycle
+
+        for req_id in completed_request_ids:
+            self.pending_code_generation_requests.pop(req_id, None)
