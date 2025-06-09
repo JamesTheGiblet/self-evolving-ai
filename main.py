@@ -205,12 +205,16 @@ def main():
 
     log("SYSTEM BOOTING...", level="INFO")
 
+    # The evolutionary cycle demo is now triggered from the GUI's "Knowledge Tools" tab.
+
     # Initialize and start the GUI
     app_gui = SimulationGUI(
         context_manager=context_manager,
         meta_agent=meta_agent,
         mutation_engine=mutation_engine,
-        knowledge_base=knowledge_base
+        knowledge_base=knowledge_base,
+        # Pass the CodeGenAgent's demonstration method to the GUI
+        run_evolutionary_cycle_func=code_gen_agent_instance.demonstrate_capability_generation
     )
     app_gui_instance = app_gui
     context_manager.set_gui_instance(app_gui)

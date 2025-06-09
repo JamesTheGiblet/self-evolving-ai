@@ -7,10 +7,12 @@ Its capabilities include refactoring existing code, scaffolding new
 functionalities, and performing radical code mutations.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import requests
 import time # For retry delay
 import re # For improved markdown parsing
+import os # For file operations in demonstrate_capability_generation
+import ast # For syntax validation in demonstrate_capability_generation
 import json
 import config # For LLM API settings
 from utils.logger import log # For logging
@@ -157,7 +159,7 @@ class CodeGenAgent:
                            If None, a default one will be created.
         """
         self.llm_interface = llm_interface if llm_interface else LLMInterface(model_name=config.LOCAL_LLM_DEFAULT_MODEL)
-        log("CodeGenAgent initialized.", level="INFO")
+        log(f"CodeGenAgent v0.3 initialized.", level="INFO")
 
     def _code_generation_skill_async(self, system_prompt: str, user_prompt: str) -> Optional[str]:
         """
@@ -286,46 +288,159 @@ class CodeGenAgent:
         
         return self._code_generation_skill_async(system_prompt=system_prompt, user_prompt=user_prompt)
 
+    def generate_capability_code(self, capability_description: str, capability_guidelines: str) -> Optional[str]:
+        """
+        Generates Python code for a new capability using the LLM (synchronously).
+        This method returns the raw code string.
+        """
+        log(f"[CodeGenAgent] Generating capability code (sync). Description: '{capability_description}', Guidelines: '{capability_guidelines}'", level="INFO")
+        system_prompt = (
+            "You are an expert Python programmer. Your task is to write a single, self-contained Python function "
+            "based on the provided description and guidelines. The function should be robust and include a clear docstring. "
+            "Only output the Python code for the function, without any introductory text, explanations, or markdown code blocks."
+        )
+        user_prompt = (
+            f"Capability Description: {capability_description}\n"
+            f"Guidelines: {capability_guidelines}\n"
+            f"Please generate the Python code for this function."
+        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        # Uses the synchronous method of LLMInterface
+        generated_code = self.llm_interface.generate_code(messages)
+        
+        if generated_code and not generated_code.startswith("# Error: LLM call failed"):
+            # LLMInterface.parse_llm_code_output is static, so call it directly
+            parsed_code = LLMInterface.parse_llm_code_output(generated_code)
+            log(f"[CodeGenAgent] Successfully generated code snippet (sync).", level="INFO")
+            return parsed_code.strip()
+        else:
+            log(f"[CodeGenAgent] Failed to generate code from LLM (sync). Raw response: {generated_code}", level="WARN")
+            return None
+
+    def _get_first_function_name(self, code_string: str) -> Optional[str]:
+        try:
+            tree = ast.parse(code_string)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef):
+                    return node.name
+        except SyntaxError:
+            return None
+        return None
+
+    def _has_docstring(self, parsed_ast_node: ast.AST, function_name: str) -> bool:
+        for node in ast.walk(parsed_ast_node):
+            if isinstance(node, ast.FunctionDef) and node.name == function_name:
+                if node.body and isinstance(node.body[0], ast.Expr) and \
+                   isinstance(node.body[0].value, ast.Constant) and \
+                   isinstance(node.body[0].value.value, str):
+                    return True
+                elif node.body and isinstance(node.body[0], ast.Expr) and \
+                     isinstance(node.body[0].value, ast.Str): # Python < 3.8
+                    return True
+        return False
+
+    def demonstrate_capability_generation(self, capability_description: str, capability_guidelines: str) -> Dict[str, Any]:
+        """
+        Demonstrates the full cycle: code generation, validation, (conditional) testing, and saving.
+        Used by the GUI and standalone demo. This is a synchronous operation.
+        Returns a dictionary with the outcome.
+        """
+        log(f"[CodeGenAgent] Starting demonstration of capability generation.", level="INFO")
+        log(f"Description: '{capability_description}'", level="INFO")
+        log(f"Guidelines: '{capability_guidelines}'", level="INFO")
+
+        outcome = {"success": False, "message": "Demonstration started.", "generated_code_path": None, "test_results": None}
+
+        new_code = self.generate_capability_code(capability_description, capability_guidelines)
+
+        if not new_code:
+            outcome["message"] = "Code generation failed: No code returned from LLM."
+            log(outcome["message"], level="ERROR")
+            return outcome
+
+        log(f"[CodeGenAgent] Generated code for demonstration:\n{new_code}\n", level="INFO")
+        outcome["generated_code_preview"] = new_code[:200] + "..." if len(new_code) > 200 else new_code
+
+        try:
+            parsed_ast = ast.parse(new_code)
+            log("Generated code is syntactically valid Python.", level="INFO")
+            outcome["validation_syntax"] = "Valid"
+
+            function_name_from_code = self._get_first_function_name(new_code)
+            if function_name_from_code:
+                docstring_present = self._has_docstring(parsed_ast, function_name_from_code)
+                log(f"Docstring check for '{function_name_from_code}': {'Present' if docstring_present else 'Missing'}",
+                    level="INFO" if docstring_present else "WARN")
+                outcome["validation_docstring"] = 'Present' if docstring_present else 'Missing'
+            else:
+                log("Could not determine function name from AST.", level="WARN")
+                outcome["validation_docstring"] = 'N/A (no function found)'
+
+            # Conditional Testing: Only for the specific "sum list" example
+            is_sum_example = "sum" in capability_description.lower() and "list" in capability_description.lower()
+            all_tests_passed = not is_sum_example 
+
+            if is_sum_example and function_name_from_code:
+                log(f"Attempting to test generated function '{function_name_from_code}' (sum example).", level="INFO")
+                local_scope = {}
+                exec(compile(parsed_ast, filename="<ast_test>", mode="exec"), {'__builtins__': __builtins__}, local_scope)
+                if function_name_from_code in local_scope and callable(local_scope[function_name_from_code]):
+                    generated_function = local_scope[function_name_from_code]
+                    test_cases = [{"input": [1, 2, 3], "expected": 6, "name": "Simple Sum"}] # Simplified test
+                    outcome["test_results"] = []
+                    for tc in test_cases:
+                        actual = generated_function(tc["input"])
+                        passed = actual == tc["expected"]
+                        outcome["test_results"].append({"name": tc["name"], "status": "PASSED" if passed else "FAILED", "actual": actual, "expected": tc["expected"]})
+                        if not passed: all_tests_passed = False
+                    log(f"Testing for '{function_name_from_code}' completed. All passed: {all_tests_passed}", level="INFO")
+
+            if all_tests_passed:
+                generated_code_dir = os.path.join(config.PROJECT_ROOT_PATH, "generated_capabilities")
+                os.makedirs(generated_code_dir, exist_ok=True)
+                file_name = os.path.join(generated_code_dir, f"{function_name_from_code or 'generated_code'}_{int(time.time())}.py")
+                with open(file_name, "w") as f:
+                    f.write(f"# Generated by CodeGenAgent\n# Description: {capability_description}\n# Guidelines: {capability_guidelines}\n\n{new_code}")
+                log(f"Successfully saved generated code to: '{os.path.abspath(file_name)}'", level="INFO")
+                outcome["success"] = True
+                outcome["message"] = f"Code generated, validated, {'tested, ' if is_sum_example else ''}and saved."
+                outcome["generated_code_path"] = os.path.abspath(file_name)
+            else:
+                outcome["message"] = "Code generated and validated, but testing failed or was skipped. Code not saved as final."
+                log(outcome["message"], level="WARN")
+
+        except SyntaxError as se:
+            outcome["message"] = f"Generated code has a syntax error: {se}"
+            log(outcome["message"], level="ERROR")
+            outcome["validation_syntax"] = f"Invalid: {se}"
+        except Exception as e:
+            outcome["message"] = f"An error occurred during validation/testing/saving: {e}"
+            log(outcome["message"], level="ERROR", exc_info=True)
+
+        log(f"[CodeGenAgent] Demonstration outcome: {outcome['message']}", level="INFO")
+        return outcome
+
 if __name__ == "__main__":
     log("Demonstrating CodeGenAgent capabilities:", level="INFO")
     agent = CodeGenAgent()
 
-    # Example: Refactor code
-    sample_code_to_refactor = "def old_function(n):\n    result = []\n    for i in range(n):\n        if i % 2 == 0:\n            result.append(i)\n    return result"
-    refactor_goal = "Make this function more Pythonic and efficient using a list comprehension."
-    refactor_req_id = agent.refactor_code(sample_code_to_refactor, refactor_goal)
-    if refactor_req_id:
-        log(f"Refactor request sent. Request ID: {refactor_req_id}. Monitor ContextManager for response.", level="INFO")
-    else:
-        log(f"Failed to send refactor request.", level="ERROR")
+    # Demonstrate the synchronous full cycle generation
+    desc = "Create a Python function that takes a list of numbers and returns their sum."
+    guide = "The function should be named 'calculate_sum_standalone_demo' and include a comprehensive docstring."
+    
+    outcome = agent.demonstrate_capability_generation(
+        capability_description=desc,
+        capability_guidelines=guide
+    )
 
-    # Example: Write new capability
-    new_cap_desc = "A new capability to fetch data from a REST API endpoint and parse the JSON response."
-    arch_guide = "The function should take a URL as input, use the 'requests' library, and handle potential HTTP errors."
-    new_cap_req_id = agent.write_new_capability(new_cap_desc, arch_guide)
-    if new_cap_req_id:
-        log(f"New capability request sent. Request ID: {new_cap_req_id}. Monitor ContextManager for response.", level="INFO")
-    else:
-        log(f"Failed to send new capability request.", level="ERROR")
+    log(f"\n--- CodeGenAgent Standalone Demonstration Outcome ---", level="INFO")
+    log(json.dumps(outcome, indent=2), level="INFO")
+    log("--- CodeGenAgent Standalone Demonstration Complete ---", level="INFO")
 
-    # Example: Implement radical mutation
-    mutation_dir = "Combine the following two functions into a single class method that processes data and then logs it."
-    func_a = "def process_data(data):\n    return data * 2"
-    func_b = "def log_data(processed_data):\n    print(f'Processed: {processed_data}')"
-    mutation_req_id = agent.implement_radical_mutation(mutation_dir, [func_a, func_b])
-    if mutation_req_id:
-        log(f"Radical mutation request sent. Request ID: {mutation_req_id}. Monitor ContextManager for response.", level="INFO")
-    else:
-        log(f"Failed to send radical mutation request.", level="ERROR")
-
-    # To see results in this standalone demo, you'd need a mock ContextManager
-    # or a simple loop checking for responses. For the full system, TaskAgent's
-    # _handle_pending_llm_operations is a good example of how to poll.
-    # For this demo, we'll just log that requests were sent.
-    # In a real test, you might:
-    # time.sleep(config.LOCAL_LLM_REQUEST_TIMEOUT + 5) # Wait for LLM
-    # response_data = context_manager_mock.get_llm_response_if_ready(new_cap_req_id)
-    # if response_data and response_data.get("status") == "completed":
-    #     parsed_code = LLMInterface.parse_llm_code_output(response_data.get("response"))
-    #     log(f"Received and Parsed New Capability Code:\n{parsed_code}\n", level="INFO")
-    log("CodeGenAgent demonstration complete.", level="INFO")
+    # The async methods like write_new_capability, refactor_code, etc.,
+    # would require a running ContextManager and an event loop to see their results,
+    # as they return request_ids for asynchronous processing.
+    # Their demonstration is better suited within the full application context.

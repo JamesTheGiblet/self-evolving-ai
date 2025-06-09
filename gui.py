@@ -24,7 +24,7 @@ class GUITextHandler(logging.Handler):
 
 class SimulationGUI(ctk.CTk):
     """Main GUI class for the Self-Evolving AI Monitor."""
-    def __init__(self, context_manager, meta_agent, mutation_engine, knowledge_base):
+    def __init__(self, context_manager, meta_agent, mutation_engine, knowledge_base, run_evolutionary_cycle_func):
         super().__init__()
         self._is_closing = False
 
@@ -38,6 +38,7 @@ class SimulationGUI(ctk.CTk):
         self.meta_agent = meta_agent
         self.mutation_engine = mutation_engine
         self.knowledge_base = knowledge_base
+        self.run_evolutionary_cycle_func = run_evolutionary_cycle_func # Store the passed function
 
         self.selected_agent_name = None
         self.simulation_thread = None
@@ -219,6 +220,33 @@ class SimulationGUI(ctk.CTk):
                                                          knowledge_base_ref=self.knowledge_base,
                                                          gui_logger_func=self.log_to_gui)
         self.knowledge_query_frame.grid(row=0, column=1, pady=(10,5), padx=5, sticky="nsew")
+
+        # --- Evolutionary Cycle Demo Frame (in Knowledge Tools Tab) ---
+        self.evo_cycle_demo_frame = ctk.CTkFrame(self.tab_knowledge_tools)
+        self.evo_cycle_demo_frame.grid(row=1, column=0, columnspan=2, pady=(10,5), padx=5, sticky="nsew")
+        self.tab_knowledge_tools.grid_rowconfigure(1, weight=0) # This frame won't expand as much
+
+        evo_current_row = 0
+        ctk.CTkLabel(self.evo_cycle_demo_frame, text="Evolutionary Cycle Demo (CodeGenAgent):", font=("Arial", 14, "bold")).grid(row=evo_current_row, column=0, columnspan=2, pady=(5,0), padx=5, sticky="w")
+        evo_current_row += 1
+
+        ctk.CTkLabel(self.evo_cycle_demo_frame, text="Capability Description:").grid(row=evo_current_row, column=0, pady=2, padx=5, sticky="w")
+        self.evo_desc_entry = ctk.CTkEntry(self.evo_cycle_demo_frame, placeholder_text="e.g., Create a Python function that sums a list.")
+        self.evo_desc_entry.grid(row=evo_current_row, column=1, pady=2, padx=5, sticky="ew")
+        evo_current_row += 1
+
+        ctk.CTkLabel(self.evo_cycle_demo_frame, text="Capability Guidelines:").grid(row=evo_current_row, column=0, pady=2, padx=5, sticky="w")
+        self.evo_guide_entry = ctk.CTkEntry(self.evo_cycle_demo_frame, placeholder_text="e.g., Name it 'calculate_sum_demo', include docstring.")
+        self.evo_guide_entry.grid(row=evo_current_row, column=1, pady=2, padx=5, sticky="ew")
+        evo_current_row += 1
+
+        self.run_evo_cycle_button = ctk.CTkButton(self.evo_cycle_demo_frame, text="Run Evolutionary Cycle Demo", command=self.trigger_evolutionary_cycle_demo)
+        self.run_evo_cycle_button.grid(row=evo_current_row, column=0, columnspan=2, pady=5, padx=5, sticky="ew")
+        evo_current_row += 1
+
+        self.evo_cycle_status_label = ctk.CTkLabel(self.evo_cycle_demo_frame, text="", font=("Arial", 12))
+        self.evo_cycle_status_label.grid(row=evo_current_row, column=0, columnspan=2, pady=5, padx=5, sticky="w")
+        self.evo_cycle_demo_frame.grid_columnconfigure(1, weight=1) # Make entry fields expand
         # --- End of Knowledge Tools Tab ---
 
         # Start periodic UI update and set up window close protocol
@@ -431,6 +459,45 @@ class SimulationGUI(ctk.CTk):
             self.after(0, _append_insight)
         else:
             _append_insight()
+
+    def trigger_evolutionary_cycle_demo(self):
+        """Triggers the evolutionary cycle demo from main_app.py via a GUI button."""
+        desc = self.evo_desc_entry.get()
+        guide = self.evo_guide_entry.get()
+
+        if not desc or not guide:
+            self.evo_cycle_status_label.configure(text="Error: Description and Guidelines are required.")
+            self.log_to_gui("Evolutionary cycle demo trigger failed: Missing inputs.")
+            return
+
+        if not callable(self.run_evolutionary_cycle_func):
+            self.evo_cycle_status_label.configure(text="Error: Evolutionary cycle function not available.")
+            self.log_to_gui("Evolutionary cycle demo trigger failed: Function not callable.")
+            return
+
+        self.evo_cycle_status_label.configure(text="Running evolutionary cycle demo...")
+        self.run_evo_cycle_button.configure(state="disabled")
+        self.log_to_gui(f"Starting evolutionary cycle demo with Desc: '{desc}', Guide: '{guide}'")
+
+        def _run_in_thread():
+            try:
+                # The run_evolutionary_cycle_func logs its own progress extensively
+                # It now returns an outcome dictionary
+                outcome = self.run_evolutionary_cycle_func(capability_description=desc, capability_guidelines=guide)
+                
+                status_message = outcome.get("message", "Evolutionary cycle demo completed. Check logs.")
+                self.after(0, lambda: self.evo_cycle_status_label.configure(text=status_message))
+                
+                log_message = f"Evolutionary cycle demo thread finished. Success: {outcome.get('success', False)}. Message: {status_message}"
+                self.log_to_gui(log_message)
+            except Exception as e:
+                self.after(0, lambda: self.evo_cycle_status_label.configure(text=f"Error running demo: {str(e)[:100]}..."))
+                self.log_to_gui(f"Error in evolutionary cycle demo thread: {str(e)[:150]}...") # Log to GUI log as well
+            finally:
+                self.after(0, lambda: self.run_evo_cycle_button.configure(state="normal"))
+
+        thread = threading.Thread(target=_run_in_thread, daemon=True)
+        thread.start()
 
     def _simulation_loop(self):
         """Main simulation loop running in a background thread."""

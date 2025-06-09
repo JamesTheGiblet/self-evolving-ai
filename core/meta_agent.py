@@ -13,6 +13,7 @@ from core.task_agent import TaskAgent # Import TaskAgent for instantiation
 from utils import local_llm_connector
 import config
 import copy # For deepcopy
+from typing import List, Dict, Any, Optional, TYPE_CHECKING, Callable
 
 if TYPE_CHECKING: # TYPE_CHECKING is True for static analysis
     from .task_router import TaskRouter
@@ -35,6 +36,7 @@ class MetaAgent: # Ensure it inherits from BaseAgent for message handling
                  default_skill_agent_configs: List[Dict[str, Any]],
                  code_gen_agent: Optional['CodeGenAgent'] = None, # Optional CodeGenAgent
                  general_llm_interface: Optional['LLMInterface'] = None, # Added
+                 code_gen_agent_instance: Optional['CodeGenAgent'] = None, # For requesting new capabilities
                  initial_task_agents: int = 1): # Added to control initial task agents
         self.name = "MetaAgent" # Added name attribute
 
@@ -58,6 +60,7 @@ class MetaAgent: # Ensure it inherits from BaseAgent for message handling
         self.identity_engine = identity_engine # Use the passed IdentityEngine instance
         self.code_gen_agent = code_gen_agent # Store CodeGenAgent if provided
         self.general_llm_interface = general_llm_interface # Store general LLM interface
+        self.code_gen_agent = code_gen_agent_instance # Store CodeGenAgent instance
         
         self.default_task_agent_config = default_task_agent_config
         self.default_skill_agent_configs = default_skill_agent_configs # Store the passed list
@@ -104,7 +107,28 @@ class MetaAgent: # Ensure it inherits from BaseAgent for message handling
         for i in range(initial_task_agents):
             self._provision_initial_task_agent(i)
 
+    def request_new_capability_code(self, capability_description: str, capability_guidelines: str, requesting_agent_id: str) -> Optional[str]:
+        """
+        Allows an agent (e.g., TaskAgent) to request the generation of new capability code.
+        This will call the CodeGenAgent.
+        """
+        log(f"[{self.name}] Received request for new capability code from agent '{requesting_agent_id}'.", level="INFO")
+        log(f"Description: '{capability_description}', Guidelines: '{capability_guidelines}'", level="DEBUG")
 
+        if not self.code_gen_agent:
+            log(f"[{self.name}] CodeGenAgent not available. Cannot fulfill request for new capability code.", level="ERROR")
+            return None
+
+        try:
+            # This call might be long-running; consider how to handle this (e.g., async, separate thread).
+            # For now, it's a direct call. The calling agent might need to manage its own time.
+            generated_code = self.code_gen_agent.generate_capability_code(capability_description, capability_guidelines)
+            if generated_code:
+                log(f"[{self.name}] CodeGenAgent returned code for agent '{requesting_agent_id}'. Preview: {generated_code[:100]}...", level="INFO")
+            return generated_code
+        except Exception as e:
+            log(f"[{self.name}] Error during call to CodeGenAgent for new capability: {e}", level="ERROR", exc_info=True)
+            return None
     def set_task_router(self, task_router: 'TaskRouter'):
         self.task_router = task_router
         log("TaskRouter has been set for MetaAgent.", level="INFO")
