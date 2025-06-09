@@ -512,8 +512,14 @@ class SkillAgent(BaseAgent):
                 "timestamp": self.context_manager.get_tick() # For freshness
             }
         }
-        if hasattr(self.communication_bus, 'publish_message'):
-            self.communication_bus.publish_message(self.name, advertisement_message) # MetaAgent or ServiceRegistry would listen
+        # Send a direct message to MetaAgent for service advertisements
+        # Assuming MetaAgent's registered name on the bus is "MetaAgent"
+        meta_agent_name_on_bus = "MetaAgent" # Or fetch from a config if it can vary
+        if hasattr(self.communication_bus, 'send_direct_message'):
+            self.communication_bus.send_direct_message(
+                sender_name=self.name,
+                recipient_name=meta_agent_name_on_bus,
+                content=advertisement_message)
             log(f"Agent {self.name} (ID: {self.id}) advertised services: {list(self.capabilities)}. Details: {service_details}", level="INFO")
         else:
-            log(f"Agent {self.name} (ID: {self.id}) could not advertise services: 'publish_message' method not found on CommunicationBus. Advertisement: {advertisement_message}", level="WARN")
+            log(f"Agent {self.name} (ID: {self.id}) could not advertise services: 'send_direct_message' method not found on CommunicationBus. Advertisement: {advertisement_message}", level="WARN")
