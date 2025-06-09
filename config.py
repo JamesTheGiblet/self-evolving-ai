@@ -56,3 +56,11 @@ KB_ACCESS_COUNT_CAP_FOR_RELEVANCE = 10 # Max access count to consider for releva
 DEFAULT_AUTO_DIAGNOSIS_ENABLED = True
 DEFAULT_MIN_ATTEMPTS_FOR_FAILURE_CHECK = 10 # Min attempts of a capability before checking its failure rate
 DEFAULT_FAILURE_RATE_THRESHOLD_FOR_INSIGHT = 0.60 # e.g., 60% failure rate
+
+# Mutation Engine Configuration
+DEFAULT_STOP_WORDS = set([
+    "the", "a", "an", "is", "are", "was", "were", "in", "on", "at", "of", "to", "for", "and",
+    "it", "this", "that", "he", "she", "they", "i", "you", "we", "me", "my", "your", "our",
+    "with", "by", "from", "as", "if", "or", "not", "be", "has", "had", "do", "does", "did",
+    "will", "can", "could", "should", "would", "p", "br", "div", "span", "href", "www", "http", "https"
+])

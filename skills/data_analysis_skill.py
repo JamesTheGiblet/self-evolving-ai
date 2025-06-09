@@ -8,7 +8,7 @@ from typing import Any, Dict, List, TYPE_CHECKING
 from skills.base_skill import BaseSkillTool
 from utils.logger import log
 from utils.data_extraction import _extract_data_recursively # Assuming this utility is available
-from core.constants import DEFAULT_STOP_WORDS # Assuming this utility is available
+from config import DEFAULT_STOP_WORDS # Assuming this utility is available
 
 # For type hinting core components to avoid circular imports at runtime
 if TYPE_CHECKING:
